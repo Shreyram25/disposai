@@ -6,10 +6,11 @@ import { Button } from '@/components/ui/button';
 import ImageScanner from '@/components/ImageScanner';
 import DisposalReport from '@/components/DisposalReport';
 import ActionConfirmation from '@/components/ActionConfirmation';
+import MultipleMedicinesReport from '@/components/MultipleMedicinesReport';
 import { Medicine } from '@/data/medicineDatabase';
 import { useGameStore } from '@/store/gameStore';
 
-type ScanStep = 'scan' | 'report' | 'confirm';
+type ScanStep = 'scan' | 'report' | 'confirm' | 'multiple';
 
 const Scan = () => {
   const navigate = useNavigate();
@@ -19,10 +20,35 @@ const Scan = () => {
   const [detectedText, setDetectedText] = useState('');
   const [currentScanId, setCurrentScanId] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | undefined>();
+  const [expectedFishType, setExpectedFishType] = useState<string | undefined>();
+  const [multipleMedicines, setMultipleMedicines] = useState<Array<{
+    medicine: Medicine;
+    confidence: number;
+    detectedText: string;
+    imageUrl: string;
+  }>>([]);
 
   const { addScan } = useGameStore();
 
   const handleDetection = (medicine: Medicine, conf: number, text: string, imgUrl?: string) => {
+    setCurrentMedicine(medicine);
+    setConfidence(conf);
+    setDetectedText(text);
+    setImageUrl(imgUrl);
+    setStep('report');
+  };
+
+  const handleMultipleDetections = (medicines: Array<{
+    medicine: Medicine;
+    confidence: number;
+    detectedText: string;
+    imageUrl: string;
+  }>) => {
+    setMultipleMedicines(medicines);
+    setStep('multiple');
+  };
+
+  const handleMedicineSelect = (medicine: Medicine, conf: number, text: string, imgUrl: string) => {
     setCurrentMedicine(medicine);
     setConfidence(conf);
     setDetectedText(text);
@@ -54,15 +80,44 @@ const Scan = () => {
   };
 
   const handleComplete = () => {
-    navigate('/');
+    // If we came from multiple medicines list, remove the processed one and go back
+    if (multipleMedicines.length > 0 && currentMedicine) {
+      // Find and remove the processed medicine from the list
+      const updatedMedicines = multipleMedicines.filter(
+        med => med.medicine.id !== currentMedicine.id
+      );
+      
+      if (updatedMedicines.length > 0) {
+        // There are more medicines to process
+        setMultipleMedicines(updatedMedicines);
+        setCurrentMedicine(null);
+        setCurrentScanId(null);
+        setStep('multiple');
+      } else {
+        // All medicines processed, go to dashboard
+        navigate('/');
+      }
+    } else {
+      // Single medicine scan, go to dashboard
+      navigate('/');
+    }
   };
 
   const handleBack = () => {
     if (step === 'report') {
-      setStep('scan');
-      setCurrentMedicine(null);
+      // If we came from multiple medicines, go back to that list
+      if (multipleMedicines.length > 0) {
+        setStep('multiple');
+        setCurrentMedicine(null);
+      } else {
+        setStep('scan');
+        setCurrentMedicine(null);
+      }
     } else if (step === 'confirm') {
       setStep('report');
+    } else if (step === 'multiple') {
+      setStep('scan');
+      setMultipleMedicines([]);
     } else {
       navigate('/');
     }
@@ -81,11 +136,13 @@ const Scan = () => {
               {step === 'scan' && 'Scan Medicine'}
               {step === 'report' && 'Disposal Report'}
               {step === 'confirm' && 'Confirm Action'}
+              {step === 'multiple' && 'Medicines Detected'}
             </h1>
             <p className="text-sm text-muted-foreground">
-              {step === 'scan' && 'Upload or capture medication image'}
+              {step === 'scan' && 'Upload or capture medication image/video'}
               {step === 'report' && 'Review safe disposal instructions'}
               {step === 'confirm' && 'Tell us what you did'}
+              {step === 'multiple' && 'Select a medicine to view disposal instructions'}
             </p>
           </div>
         </div>
@@ -101,7 +158,10 @@ const Scan = () => {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
             >
-              <ImageScanner onDetection={handleDetection} />
+              <ImageScanner 
+                onDetection={handleDetection}
+                onMultipleDetections={handleMultipleDetections}
+              />
             </motion.div>
           )}
 
@@ -116,7 +176,29 @@ const Scan = () => {
                 medicine={currentMedicine}
                 confidence={confidence}
                 detectedText={detectedText}
+                imageUrl={imageUrl}
                 onConfirmAction={handleConfirmAction}
+              />
+            </motion.div>
+          )}
+
+          {step === 'multiple' && multipleMedicines.length > 0 && (
+            <motion.div
+              key="multiple"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+            >
+              <MultipleMedicinesReport
+                medicines={multipleMedicines}
+                onMedicineSelect={handleMedicineSelect}
+                onCompleteAll={() => {
+                  // Process first medicine
+                  if (multipleMedicines.length > 0) {
+                    const first = multipleMedicines[0];
+                    handleMedicineSelect(first.medicine, first.confidence, first.detectedText, first.imageUrl);
+                  }
+                }}
               />
             </motion.div>
           )}
@@ -131,6 +213,12 @@ const Scan = () => {
               <ActionConfirmation
                 scanId={currentScanId}
                 recommendedMethod={currentMedicine.disposalMethods.primary.method}
+                environmentalImpact={currentMedicine.environmentalRisk.level}
+                medicineName={currentMedicine.brandNames[0]}
+                remainingMedicinesCount={multipleMedicines.length}
+                isAntibiotic={currentMedicine.hazardFlags.antibiotic}
+                isControlled={currentMedicine.hazardFlags.controlled}
+                expectedFishType={expectedFishType}
                 onComplete={handleComplete}
               />
             </motion.div>

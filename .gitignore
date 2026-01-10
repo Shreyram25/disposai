@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 *.local
+# Allow .env file to be tracked (user requested)
+!.env
 
 # Editor directories and files
 .vscode/*

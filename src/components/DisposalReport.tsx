@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { toPng } from 'html-to-image';
 import { 
@@ -14,17 +14,21 @@ import {
   Shield,
   MapPin,
   ChevronRight,
-  Leaf
+  Leaf,
+  Loader2,
+  Fish
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Medicine, takeBackLocations } from '@/data/medicineDatabase';
+import { Medicine } from '@/data/medicineDatabase';
+import { findNearbyHospitals, getImproperDisposalImpact, selectFishForImpact } from '@/services/openai';
 import { cn } from '@/lib/utils';
 
 interface DisposalReportProps {
   medicine: Medicine;
   confidence: number;
   detectedText: string;
-  onConfirmAction: () => void;
+  imageUrl?: string;
+  onConfirmAction: (fishType?: string) => void;
 }
 
 const getRatingColor = (rating: string) => {
@@ -58,9 +62,104 @@ const getMethodIcon = (icon: string) => {
   }
 };
 
-const DisposalReport = ({ medicine, confidence, detectedText, onConfirmAction }: DisposalReportProps) => {
+const getFishPreviewUrl = (fishType: string): string => {
+  const fishImageMap: Record<string, string> = {
+    mackerel: 'https://source.unsplash.com/100x100/?mackerel,fish',
+    sardine: 'https://source.unsplash.com/100x100/?sardine,fish',
+    anchovy: 'https://source.unsplash.com/100x100/?anchovy,fish',
+    guppy: 'https://source.unsplash.com/100x100/?guppy,fish,aquarium',
+    tetra: 'https://source.unsplash.com/100x100/?tetra,fish,aquarium',
+    goldfish: 'https://source.unsplash.com/100x100/?goldfish,fish,aquarium',
+    clownfish: 'https://source.unsplash.com/100x100/?clownfish,fish,reef',
+    angelfish: 'https://source.unsplash.com/100x100/?angelfish,fish,reef',
+    betta: 'https://source.unsplash.com/100x100/?betta,fish,aquarium',
+    salmon: 'https://source.unsplash.com/100x100/?salmon,fish',
+    tuna: 'https://source.unsplash.com/100x100/?tuna,fish',
+    shark: 'https://source.unsplash.com/100x100/?shark,fish,ocean',
+    whale: 'https://source.unsplash.com/100x100/?whale,ocean',
+  };
+  return fishImageMap[fishType] || fishImageMap.mackerel;
+};
+
+const DisposalReport = ({ medicine, confidence, detectedText, imageUrl, onConfirmAction }: DisposalReportProps) => {
   const reportRef = useRef<HTMLDivElement>(null);
   const actionId = `ECO-${Date.now().toString(36).toUpperCase()}`;
+  const [hospitals, setHospitals] = useState<Array<{
+    id: number;
+    name: string;
+    address: string;
+    distance: string;
+    acceptsAll: boolean;
+    hours: string;
+  }>>([]);
+  const [loadingHospitals, setLoadingHospitals] = useState(true);
+  const [impactInfo, setImpactInfo] = useState<{
+    impactDescription: string;
+    fishThatWouldDie: string;
+    fishYouWillSave: string;
+  } | null>(null);
+  const [fishPreview, setFishPreview] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Get user location and find nearby hospitals
+    const loadHospitals = async () => {
+      try {
+        let latitude: number | undefined;
+        let longitude: number | undefined;
+
+        // Try to get user's location
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            (position) => {
+              latitude = position.coords.latitude;
+              longitude = position.coords.longitude;
+              findNearbyHospitals(latitude, longitude).then(setHospitals).finally(() => setLoadingHospitals(false));
+            },
+            () => {
+              // If location denied, use default city
+              findNearbyHospitals().then(setHospitals).finally(() => setLoadingHospitals(false));
+            }
+          );
+        } else {
+          // No geolocation support, use default
+          const locations = await findNearbyHospitals();
+          setHospitals(locations);
+          setLoadingHospitals(false);
+        }
+      } catch (error) {
+        console.error('Failed to load hospitals:', error);
+        setLoadingHospitals(false);
+      }
+    };
+
+    // Load impact information
+    const loadImpactInfo = async () => {
+      try {
+        const impact = await getImproperDisposalImpact(
+          medicine.environmentalRisk.level,
+          medicine.brandNames[0],
+          medicine.genericName,
+          medicine.hazardFlags.antibiotic
+        );
+        setImpactInfo(impact);
+        
+        // Get fish preview
+        const fishType = await selectFishForImpact(
+          medicine.environmentalRisk.level,
+          medicine.brandNames[0],
+          medicine.genericName,
+          medicine.hazardFlags.antibiotic,
+          medicine.hazardFlags.controlled
+        );
+        setFishPreview(fishType);
+      } catch (error) {
+        console.error('Failed to load impact info:', error);
+      }
+    };
+
+    loadHospitals();
+    loadImpactInfo();
+  }, [medicine]);
 
   const handleDownload = async () => {
     if (reportRef.current) {
@@ -123,13 +222,16 @@ const DisposalReport = ({ medicine, confidence, detectedText, onConfirmAction }:
             </div>
           </div>
 
-          {/* Detection info */}
-          <div className="mt-4 flex items-center gap-2 bg-white/10 rounded-xl px-3 py-2">
-            <CheckCircle className="h-4 w-4" />
-            <span className="text-sm">
-              Detected: "{detectedText}" ({Math.round(confidence)}% confidence)
-            </span>
-          </div>
+          {/* Medicine Image */}
+          {imageUrl && (
+            <div className="mt-4 bg-white/10 rounded-xl p-2">
+              <img 
+                src={imageUrl} 
+                alt={medicine.brandNames[0]}
+                className="w-full h-32 object-contain rounded-lg"
+              />
+            </div>
+          )}
         </div>
 
         {/* Content */}
@@ -186,10 +288,49 @@ const DisposalReport = ({ medicine, confidence, detectedText, onConfirmAction }:
                 {medicine.environmentalRisk.level.toUpperCase()} Risk
               </span>
             </div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground mb-3">
               {medicine.environmentalRisk.description}
             </p>
+            
+            {/* Impact of Improper Disposal */}
+            {impactInfo && (
+              <div className="mt-3 pt-3 border-t border-primary/20">
+                <p className="text-xs font-semibold text-destructive mb-2">⚠️ If Disposed Improperly:</p>
+                <p className="text-xs text-muted-foreground mb-2">{impactInfo.impactDescription}</p>
+                <div className="flex items-center gap-2 mt-2">
+                  <Fish className="h-4 w-4 text-primary" />
+                  <span className="text-xs text-primary font-medium">
+                    You'll save: {impactInfo.fishYouWillSave.charAt(0).toUpperCase() + impactInfo.fishYouWillSave.slice(1)}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
+
+          {/* Fish Preview */}
+          {fishPreview && (
+            <div className="bg-water-light/10 rounded-2xl p-4 border border-primary/20">
+              <div className="flex items-center gap-3">
+                <div className="w-16 h-16 rounded-xl overflow-hidden bg-muted flex items-center justify-center">
+                  <img
+                    src={getFishPreviewUrl(fishPreview)}
+                    alt={fishPreview}
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      // Fallback if image fails
+                      (e.target as HTMLImageElement).style.display = 'none';
+                    }}
+                  />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold">Fish You'll Save</p>
+                  <p className="text-xs text-muted-foreground capitalize">
+                    {fishPreview} will be added to your aquarium
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Did You Know */}
           <div className="flex gap-3 items-start bg-muted/30 rounded-2xl p-4">
@@ -200,27 +341,42 @@ const DisposalReport = ({ medicine, confidence, detectedText, onConfirmAction }:
             </div>
           </div>
 
-          {/* Nearby Locations */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <MapPin className="h-4 w-4 text-primary" />
-              <p className="font-semibold">Nearby Take-Back Locations</p>
-            </div>
-            <div className="space-y-2">
-              {takeBackLocations.slice(0, 2).map((location) => (
-                <div 
-                  key={location.id}
-                  className="flex items-center justify-between bg-muted/30 rounded-xl p-3"
-                >
-                  <div>
-                    <p className="font-medium text-sm">{location.name}</p>
-                    <p className="text-xs text-muted-foreground">{location.distance} away</p>
-                  </div>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          {/* Nearby Hospitals */}
+          {medicine.disposalMethods.primary.method.includes('Hospital') || medicine.disposalMethods.primary.method.includes('Take-Back') ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-primary" />
+                <p className="font-semibold">Nearby DHA Hospitals</p>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary">Clean Your Medicine Cabinet Drive</span>
+              </div>
+              {loadingHospitals ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                  <span className="ml-2 text-sm text-muted-foreground">Finding nearby hospitals...</span>
                 </div>
-              ))}
+              ) : hospitals.length > 0 ? (
+                <div className="space-y-2">
+                  {hospitals.slice(0, 2).map((location) => (
+                    <div 
+                      key={location.id}
+                      className="flex items-center justify-between bg-muted/30 rounded-xl p-3"
+                    >
+                      <div>
+                        <p className="font-medium text-sm">{location.name}</p>
+                        <p className="text-xs text-muted-foreground">{location.address}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{location.distance} away • {location.hours}</p>
+                      </div>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="bg-muted/30 rounded-xl p-3 text-center">
+                  <p className="text-sm text-muted-foreground">Unable to find nearby hospitals. Please search for DHA hospitals manually.</p>
+                </div>
+              )}
             </div>
-          </div>
+          ) : null}
 
           {/* Report Footer */}
           <div className="flex items-center justify-between pt-4 border-t border-border">
@@ -244,7 +400,7 @@ const DisposalReport = ({ medicine, confidence, detectedText, onConfirmAction }:
           variant="ocean" 
           size="lg" 
           className="w-full"
-          onClick={onConfirmAction}
+          onClick={() => onConfirmAction(fishPreview || undefined)}
         >
           <CheckCircle className="h-5 w-5" />
           I've Disposed This Medication
@@ -274,8 +430,8 @@ const DisposalReport = ({ medicine, confidence, detectedText, onConfirmAction }:
 
       {/* Disclaimer */}
       <p className="mt-6 text-xs text-muted-foreground text-center px-4">
-        This tool provides general guidance only. Follow local regulations and pharmacy 
-        instructions. When in doubt, use take-back programs.
+        This tool provides general guidance only. Follow local regulations and DHA guidelines. 
+        When in doubt, use hospital take-back programs (DHA Clean Your Medicine Cabinet Drive).
       </p>
     </motion.div>
   );

@@ -1,9 +1,12 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Camera, Upload, X, Loader2, Edit2, Check, ImageIcon, Sparkles } from 'lucide-react';
+import { Camera, Upload, X, Loader2, Edit2, Check, ImageIcon, Sparkles, AlertCircle, Video } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { findMedicine, getUnknownMedicineResponse, Medicine } from '@/data/medicineDatabase';
+import { Medicine } from '@/data/medicineDatabase';
+import { extractTextFromImage, cleanupOCR } from '@/services/ocr';
+import { identifyMedicine, identifyMedicineFromImage, MedicineInfo } from '@/services/openai';
+import VideoScanner from '@/components/VideoScanner';
 import { cn } from '@/lib/utils';
 
 // Sample images for demo
@@ -27,9 +30,17 @@ const sampleImages = [
 
 interface ImageScannerProps {
   onDetection: (medicine: Medicine, confidence: number, detectedText: string, imageUrl?: string) => void;
+  onMultipleDetections?: (medicines: Array<{ medicine: Medicine; confidence: number; detectedText: string; imageUrl: string }>) => void;
 }
 
-const ImageScanner = ({ onDetection }: ImageScannerProps) => {
+// Convert MedicineInfo to Medicine format for compatibility
+const convertMedicineInfo = (info: MedicineInfo): Medicine => ({
+  ...info,
+  form: info.form === 'other' ? 'tablet' : info.form,
+});
+
+const ImageScanner = ({ onDetection, onMultipleDetections }: ImageScannerProps) => {
+  const [scanMode, setScanMode] = useState<'image' | 'video'>('image');
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [detectedText, setDetectedText] = useState('');
@@ -37,69 +48,139 @@ const ImageScanner = ({ onDetection }: ImageScannerProps) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState('');
   const [showDetection, setShowDetection] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [currentFile, setCurrentFile] = useState<File | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
-  const simulateOCR = useCallback((imageName: string = ''): string => {
-    // Simulated OCR results based on image
-    const ocrResults = [
-      'Panadol Extra Strength',
-      'Panadol Advance 500mg',
-      'Adol Tablets',
-      'Amoxicillin 250mg Capsules',
-      'Brufen 400mg',
-      'Ventolin Inhaler',
-      'Unknown Medication',
-    ];
-    
-    // Try to match sample image name first
-    if (imageName.toLowerCase().includes('panadol')) {
-      return 'Panadol Extra Strength 500mg';
-    } else if (imageName.toLowerCase().includes('aspirin')) {
-      return 'Aspirin Bayer 500mg';
-    } else if (imageName.toLowerCase().includes('amoxicillin')) {
-      return 'Amoxicillin 250mg Capsules';
-    }
-    
-    return ocrResults[Math.floor(Math.random() * ocrResults.length)];
+  // Cleanup OCR worker on unmount
+  useEffect(() => {
+    return () => {
+      cleanupOCR();
+    };
   }, []);
 
-  const processImage = useCallback(async (url: string, hint?: string) => {
+  const processImage = useCallback(async (url: string, file?: File, hint?: string) => {
     setImageUrl(url);
     setIsProcessing(true);
     setShowDetection(false);
+    setError(null);
 
-    // Simulate AI processing time
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    try {
+      // Step 1: Extract text using OCR (in parallel with Vision API)
+      let ocrText = '';
+      let ocrConfidence = 0;
 
-    const detected = hint || simulateOCR();
-    const detectionConfidence = 75 + Math.random() * 20; // 75-95%
-    
-    setDetectedText(detected);
-    setEditedText(detected);
-    setConfidence(detectionConfidence);
-    setIsProcessing(false);
-    setShowDetection(true);
-  }, [simulateOCR]);
+      const ocrPromise = (async () => {
+        if (hint) {
+          return { text: hint, confidence: 90 };
+        } else if (file) {
+          return await extractTextFromImage(file);
+        } else {
+          return await extractTextFromImage(url);
+        }
+      })();
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+      // Step 2: Use GPT-4 Vision API to analyze the image
+      const visionPromise = (async () => {
+        if (file) {
+          return await identifyMedicineFromImage(file);
+        } else if (url) {
+          return await identifyMedicineFromImage(url);
+        }
+        return null;
+      })();
+
+      // Wait for both OCR and Vision API
+      const [ocrResult, visionResult] = await Promise.all([ocrPromise, visionPromise]);
+
+      ocrText = ocrResult.text;
+      ocrConfidence = ocrResult.confidence;
+
+      // If OCR failed but Vision API succeeded, use Vision API result
+      if ((!ocrText || ocrText === 'No text detected' || ocrText === 'Text extraction failed') && visionResult) {
+        ocrText = visionResult.brandNames[0] || visionResult.genericName || 'Medicine detected';
+        ocrConfidence = 95; // High confidence from Vision API
+      }
+
+      // If we have OCR text but no Vision result, we'll use OCR text for identification
+      // If we have both, Vision API result is already the medicine info
+      setDetectedText(ocrText);
+      setEditedText(ocrText);
+      setConfidence(ocrConfidence);
+      setIsProcessing(false);
+      setShowDetection(true);
+      
+      // Store the vision result for later use
+      if (visionResult && file) {
+        (file as any).visionResult = visionResult;
+      }
+    } catch (err) {
+      console.error('Image processing failed:', err);
+      setError(err instanceof Error ? err.message : 'Failed to process image');
+      setIsProcessing(false);
+    }
+  }, []);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setCurrentFile(file);
       const url = URL.createObjectURL(file);
-      processImage(url, file.name);
+      await processImage(url, file);
     }
   };
 
-  const handleSampleClick = (sample: typeof sampleImages[0]) => {
-    processImage(sample.url, sample.detectedText);
+  const handleCameraCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setCurrentFile(file);
+      const url = URL.createObjectURL(file);
+      await processImage(url, file);
+    }
   };
 
-  const handleConfirm = () => {
+  const handleSampleClick = async (sample: typeof sampleImages[0]) => {
+    setCurrentFile(null);
+    await processImage(sample.url, undefined, sample.detectedText);
+  };
+
+  const handleConfirm = async () => {
     const finalText = isEditing ? editedText : detectedText;
-    const medicine = findMedicine(finalText) || getUnknownMedicineResponse();
-    const finalConfidence = isEditing ? 100 : confidence;
     
-    onDetection(medicine, finalConfidence, finalText, imageUrl || undefined);
+    if (!finalText || finalText.trim().length === 0) {
+      setError('Please enter or confirm the detected medicine name');
+      return;
+    }
+
+    setIsProcessing(true);
+    setError(null);
+
+    try {
+      let medicineInfo: MedicineInfo;
+      
+      // If we have a vision result from earlier, use it
+      if (currentFile && (currentFile as any).visionResult) {
+        medicineInfo = (currentFile as any).visionResult;
+      } else if (currentFile || imageUrl) {
+        // Use Vision API with the image
+        const imageSource = currentFile || imageUrl!;
+        medicineInfo = await identifyMedicineFromImage(imageSource, finalText);
+      } else {
+        // Fallback to text-only identification
+        medicineInfo = await identifyMedicine(finalText);
+      }
+      
+      const medicine = convertMedicineInfo(medicineInfo);
+      const finalConfidence = isEditing ? 100 : confidence;
+      
+      onDetection(medicine, finalConfidence, finalText, imageUrl || undefined);
+    } catch (err) {
+      console.error('Medicine identification failed:', err);
+      setError('Failed to identify medicine. Please try again or check your API key.');
+      setIsProcessing(false);
+    }
   };
 
   const handleEdit = () => {
@@ -116,10 +197,64 @@ const ImageScanner = ({ onDetection }: ImageScannerProps) => {
     setConfidence(0);
     setShowDetection(false);
     setIsEditing(false);
+    setError(null);
+    setCurrentFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
+
+  // If video mode, show VideoScanner
+  if (scanMode === 'video' && onMultipleDetections) {
+    return (
+      <div className="w-full max-w-md mx-auto space-y-6">
+        <div className="flex gap-2 mb-4">
+          <Button
+            variant="glass"
+            size="sm"
+            onClick={() => setScanMode('image')}
+          >
+            <Camera className="h-4 w-4 mr-2" />
+            Image
+          </Button>
+          <Button
+            variant="ocean"
+            size="sm"
+            onClick={() => setScanMode('video')}
+          >
+            <Video className="h-4 w-4 mr-2" />
+            Video
+          </Button>
+        </div>
+        <VideoScanner onDetections={onMultipleDetections} />
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-md mx-auto space-y-6">
+      {/* Mode Selector */}
+      {onMultipleDetections && (
+        <div className="flex gap-2 mb-4">
+          <Button
+            variant={scanMode === 'image' ? 'ocean' : 'glass'}
+            size="sm"
+            onClick={() => setScanMode('image')}
+          >
+            <Camera className="h-4 w-4 mr-2" />
+            Image
+          </Button>
+          <Button
+            variant={scanMode === 'video' ? 'ocean' : 'glass'}
+            size="sm"
+            onClick={() => setScanMode('video')}
+          >
+            <Video className="h-4 w-4 mr-2" />
+            Video
+          </Button>
+        </div>
+      )}
+
       <AnimatePresence mode="wait">
         {!imageUrl ? (
           <motion.div
@@ -130,19 +265,7 @@ const ImageScanner = ({ onDetection }: ImageScannerProps) => {
             className="space-y-6"
           >
             {/* Upload Area */}
-            <div 
-              className="relative border-2 border-dashed border-primary/30 rounded-3xl p-8 bg-primary/5 hover:bg-primary/10 transition-colors cursor-pointer"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={handleFileUpload}
-                className="hidden"
-              />
-              
+            <div className="border-2 border-dashed border-primary/30 rounded-3xl p-8 bg-primary/5">
               <div className="text-center">
                 <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
                   <Camera className="h-8 w-8 text-primary" />
@@ -152,11 +275,37 @@ const ImageScanner = ({ onDetection }: ImageScannerProps) => {
                   Take a photo or upload an image of your medication
                 </p>
                 <div className="flex gap-3 justify-center">
-                  <Button variant="ocean" size="default">
+                  {/* Camera Input */}
+                  <input
+                    ref={cameraInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={handleCameraCapture}
+                    className="hidden"
+                  />
+                  <Button 
+                    variant="ocean" 
+                    size="default"
+                    onClick={() => cameraInputRef.current?.click()}
+                  >
                     <Camera className="h-4 w-4" />
                     Take Photo
                   </Button>
-                  <Button variant="glass" size="default">
+                  
+                  {/* Upload Input */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                  <Button 
+                    variant="glass" 
+                    size="default"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
                     <Upload className="h-4 w-4" />
                     Upload
                   </Button>
@@ -227,7 +376,9 @@ const ImageScanner = ({ onDetection }: ImageScannerProps) => {
                   >
                     <div className="text-center text-white">
                       <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
-                      <p className="text-sm font-medium">Analyzing image...</p>
+                      <p className="text-sm font-medium">
+                        {showDetection ? 'Identifying medicine with AI...' : 'Extracting text from image...'}
+                      </p>
                       
                       {/* Scan line animation */}
                       <motion.div
@@ -242,9 +393,24 @@ const ImageScanner = ({ onDetection }: ImageScannerProps) => {
               </AnimatePresence>
             </div>
 
+            {/* Error Message */}
+            {error && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-destructive/10 border border-destructive/20 rounded-2xl p-4 flex items-start gap-3"
+              >
+                <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-destructive">Error</p>
+                  <p className="text-xs text-destructive/80 mt-1">{error}</p>
+                </div>
+              </motion.div>
+            )}
+
             {/* Detection Result */}
             <AnimatePresence>
-              {showDetection && (
+              {showDetection && !error && (
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -301,8 +467,16 @@ const ImageScanner = ({ onDetection }: ImageScannerProps) => {
                     size="lg"
                     className="w-full"
                     onClick={handleConfirm}
+                    disabled={isProcessing}
                   >
-                    Get Disposal Instructions
+                    {isProcessing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        Identifying with AI...
+                      </>
+                    ) : (
+                      'Get Disposal Instructions'
+                    )}
                   </Button>
                 </motion.div>
               )}

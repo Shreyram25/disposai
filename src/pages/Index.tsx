@@ -10,7 +10,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import FishBowl from '@/components/FishBowl';
+import Aquarium from '@/components/Aquarium';
 import StatsCard from '@/components/StatsCard';
 import AchievementBadge from '@/components/AchievementBadge';
 import { useGameStore } from '@/store/gameStore';
@@ -41,7 +41,7 @@ const Index = () => {
             transition={{ delay: 0.2 }}
             className="flex justify-center"
           >
-            <FishBowl size="lg" showStats={false} />
+            <Aquarium size="lg" showStats={false} />
           </motion.div>
         </div>
       </section>

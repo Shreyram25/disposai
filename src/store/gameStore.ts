@@ -1,12 +1,29 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+export type FishType = 
+  | 'mackerel'      // Small impact
+  | 'sardine'       // Small impact
+  | 'anchovy'       // Small impact
+  | 'guppy'         // Small-medium impact
+  | 'tetra'         // Small-medium impact
+  | 'goldfish'      // Medium impact
+  | 'clownfish'     // Medium impact
+  | 'angelfish'     // Medium-high impact
+  | 'betta'         // Medium-high impact
+  | 'salmon'        // High impact
+  | 'tuna'          // Very high impact
+  | 'shark'         // Critical impact
+  | 'whale'         // Maximum impact;
+
 export interface Fish {
   id: string;
-  type: 'goldfish' | 'clownfish' | 'angelfish' | 'betta' | 'guppy' | 'tetra';
+  type: FishType;
   name: string;
   addedAt: Date;
   milestone?: string;
+  medicineName?: string; // Which medicine saved this fish
+  impactLevel?: 'low' | 'medium' | 'high' | 'critical';
 }
 
 export interface ScanRecord {
@@ -54,8 +71,8 @@ interface GameState {
   
   // Actions
   addScan: (scan: Omit<ScanRecord, 'id' | 'timestamp'>) => void;
-  updateScanAction: (scanId: string, action: ScanRecord['actionTaken'], quality: ScanRecord['actionQuality']) => void;
-  addFish: (type: Fish['type'], milestone?: string) => void;
+  updateScanAction: (scanId: string, action: ScanRecord['actionTaken'], quality: ScanRecord['actionQuality'], environmentalImpact?: 'low' | 'medium' | 'high' | 'critical', medicineName?: string, calculatedPoints?: number, expectedFishType?: string) => void;
+  addFish: (type: FishType, milestone?: string, medicineName?: string, impactLevel?: 'low' | 'medium' | 'high' | 'critical') => void;
   addPoints: (points: number) => void;
   updateStreak: () => void;
   checkAchievements: () => void;
@@ -147,12 +164,11 @@ export const useGameStore = create<GameState>()(
         }));
       },
 
-      updateScanAction: (scanId, action, quality) => {
-        let pointsToAdd = 0;
-        
-        if (quality === 'great') pointsToAdd = 50;
-        else if (quality === 'okay') pointsToAdd = 25;
-        else if (quality === 'risky') pointsToAdd = 5;
+      updateScanAction: async (scanId, action, quality, environmentalImpact, medicineName, calculatedPoints?: number, expectedFishType?: string) => {
+        // Points should be calculated by ActionConfirmation using GPT
+        // This function just updates the scan record
+        const scan = get().scanHistory.find(s => s.id === scanId);
+        const pointsToAdd = calculatedPoints !== undefined && calculatedPoints > 0 ? calculatedPoints : (scan?.pointsEarned || 0);
 
         set((state) => {
           const updatedHistory = state.scanHistory.map((scan) =>
@@ -181,23 +197,72 @@ export const useGameStore = create<GameState>()(
         // Check for achievements
         get().checkAchievements();
 
-        // Add fish if milestone reached
+        // Add fish based on environmental impact if action was great
+        if (action !== 'skipped' && quality === 'great' && environmentalImpact) {
+          const scan = get().scanHistory.find(s => s.id === scanId);
+          if (scan) {
+            // Use expected fish type if provided (from DisposalReport), otherwise calculate
+            if (expectedFishType) {
+              // Use the fish type that was shown in the preview
+              get().addFish(
+                expectedFishType as FishType,
+                `Saved by disposing ${scan.medicineName} properly!`,
+                scan.medicineName,
+                environmentalImpact
+              );
+            } else {
+              // Fallback: calculate fish type
+              import('@/services/openai').then(({ selectFishForImpact }) => {
+                const isAntibiotic = scan.medicineName?.toLowerCase().includes('antibiotic') || 
+                                     scan.medicineName?.toLowerCase().includes('amoxicillin') ||
+                                     scan.medicineName?.toLowerCase().includes('penicillin');
+                const isControlled = scan.safetyRating === 'A' && scan.medicineName?.toLowerCase().includes('controlled');
+                
+                selectFishForImpact(
+                  environmentalImpact,
+                  scan.medicineName || 'Unknown',
+                  scan.medicineName || 'Unknown',
+                  isAntibiotic,
+                  isControlled
+                ).then((fishType) => {
+                  get().addFish(
+                    fishType,
+                    `Saved by disposing ${scan.medicineName} properly!`,
+                    scan.medicineName,
+                    environmentalImpact
+                  );
+                }).catch(() => {
+                  // Fallback if GPT fails
+                  const fallbackFish: FishType = 
+                    environmentalImpact === 'critical' ? 'tuna' :
+                    environmentalImpact === 'high' ? 'salmon' :
+                    environmentalImpact === 'medium' ? 'goldfish' : 'mackerel';
+                  get().addFish(fallbackFish, `Saved by disposing ${scan.medicineName} properly!`, scan.medicineName, environmentalImpact);
+                });
+              });
+            }
+          }
+        }
+
+        // Also add fish for milestones (legacy support)
         const state = get();
         const milestones = [1, 3, 5, 10, 15, 25];
         if (milestones.includes(state.totalDisposals)) {
-          const fishTypes: Fish['type'][] = ['goldfish', 'guppy', 'tetra', 'clownfish', 'angelfish', 'betta'];
+          const fishTypes: FishType[] = ['goldfish', 'guppy', 'tetra', 'clownfish', 'angelfish', 'betta'];
           const typeIndex = milestones.indexOf(state.totalDisposals);
           get().addFish(fishTypes[typeIndex], `${state.totalDisposals} safe disposals!`);
         }
       },
 
-      addFish: (type, milestone) => {
+      addFish: (type, milestone, medicineName, impactLevel) => {
         const newFish: Fish = {
           id: crypto.randomUUID(),
           type,
           name: fishNames[Math.floor(Math.random() * fishNames.length)],
           addedAt: new Date(),
           milestone,
+          medicineName,
+          impactLevel,
         };
         set((state) => ({
           fish: [...state.fish, newFish],

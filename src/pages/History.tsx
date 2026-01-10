@@ -144,9 +144,9 @@ const History = () => {
                   {/* Content */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
-                      <div>
+                      <div className="min-w-0 flex-1">
                         <h3 className="font-semibold truncate">{scan.medicineName}</h3>
-                        <p className="text-xs text-muted-foreground truncate">
+                        <p className="text-xs text-muted-foreground break-words line-clamp-2">
                           {scan.detectedText}
                         </p>
                       </div>
