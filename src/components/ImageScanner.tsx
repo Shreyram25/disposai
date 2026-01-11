@@ -1,32 +1,16 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Camera, Upload, X, Loader2, Edit2, Check, ImageIcon, Sparkles, AlertCircle, Video } from 'lucide-react';
+import { Camera, Upload, X, Loader2, Edit2, Check, ImageIcon, AlertCircle, Video, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Medicine } from '@/data/medicineDatabase';
+import { popularMedicines } from '@/data/popularMedicines';
 import { extractTextFromImage, cleanupOCR } from '@/services/ocr';
-import { identifyMedicine, identifyMedicineFromImage, MedicineInfo } from '@/services/openai';
+import { identifyMedicine, identifyMedicineFromImage, MedicineInfo, getDisposalInfoForMedicine } from '@/services/openai';
 import VideoScanner from '@/components/VideoScanner';
 import { cn } from '@/lib/utils';
 
-// Sample images for demo
-const sampleImages = [
-  { 
-    name: 'Panadol', 
-    url: 'https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=400&h=300&fit=crop',
-    detectedText: 'Panadol Extra'
-  },
-  { 
-    name: 'Aspirin', 
-    url: 'https://images.unsplash.com/photo-1550572017-edd951b55104?w=400&h=300&fit=crop',
-    detectedText: 'Aspirin 500mg'
-  },
-  { 
-    name: 'Medicine Bottle', 
-    url: 'https://images.unsplash.com/photo-1471864190281-a93a3070b6de?w=400&h=300&fit=crop',
-    detectedText: 'Amoxicillin Capsules'
-  },
-];
 
 interface ImageScannerProps {
   onDetection: (medicine: Medicine, confidence: number, detectedText: string, imageUrl?: string) => void;
@@ -40,7 +24,7 @@ const convertMedicineInfo = (info: MedicineInfo): Medicine => ({
 });
 
 const ImageScanner = ({ onDetection, onMultipleDetections }: ImageScannerProps) => {
-  const [scanMode, setScanMode] = useState<'image' | 'video'>('image');
+  const [scanMode, setScanMode] = useState<'image' | 'video' | 'manual'>('image');
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [detectedText, setDetectedText] = useState('');
@@ -50,6 +34,7 @@ const ImageScanner = ({ onDetection, onMultipleDetections }: ImageScannerProps) 
   const [showDetection, setShowDetection] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentFile, setCurrentFile] = useState<File | null>(null);
+  const [selectedMedicine, setSelectedMedicine] = useState<string>('');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -141,10 +126,6 @@ const ImageScanner = ({ onDetection, onMultipleDetections }: ImageScannerProps) 
     }
   };
 
-  const handleSampleClick = async (sample: typeof sampleImages[0]) => {
-    setCurrentFile(null);
-    await processImage(sample.url, undefined, sample.detectedText);
-  };
 
   const handleConfirm = async () => {
     const finalText = isEditing ? editedText : detectedText;
@@ -264,17 +245,107 @@ const ImageScanner = ({ onDetection, onMultipleDetections }: ImageScannerProps) 
             exit={{ opacity: 0, y: -20 }}
             className="space-y-6"
           >
-            {/* Upload Area */}
-            <div className="border-2 border-dashed border-primary/30 rounded-3xl p-8 bg-primary/5">
-              <div className="text-center">
-                <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-                  <Camera className="h-8 w-8 text-primary" />
+            {/* Mode Selector */}
+            <div className="flex gap-2 mb-4">
+              <Button
+                variant={scanMode === 'image' ? 'ocean' : 'glass'}
+                size="sm"
+                onClick={() => setScanMode('image')}
+              >
+                <Camera className="h-4 w-4 mr-2" />
+                Scan
+              </Button>
+              <Button
+                variant={scanMode === 'manual' ? 'ocean' : 'glass'}
+                size="sm"
+                onClick={() => setScanMode('manual')}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Manual Add
+              </Button>
+            </div>
+
+            {scanMode === 'manual' ? (
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Select Medicine</label>
+                  <Select value={selectedMedicine} onValueChange={setSelectedMedicine}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Choose a medicine..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {popularMedicines.map((med) => (
+                        <SelectItem key={med.id} value={med.id}>
+                          {med.brandNames[0]} ({med.genericName})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-                <h3 className="text-lg font-semibold mb-2">Scan Medicine Package</h3>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Take a photo or upload an image of your medication
-                </p>
-                <div className="flex gap-3 justify-center">
+                <Button
+                  variant="ocean"
+                  size="lg"
+                  className="w-full"
+                  onClick={async () => {
+                    if (!selectedMedicine) {
+                      setError('Please select a medicine');
+                      return;
+                    }
+                    const med = popularMedicines.find(m => m.id === selectedMedicine);
+                    if (!med) return;
+                    
+                    setIsProcessing(true);
+                    try {
+                      const disposalInfo = await getDisposalInfoForMedicine(
+                        med.brandNames[0],
+                        med.genericName,
+                        med.category,
+                        med.form
+                      );
+                      const medicine: Medicine = {
+                        id: med.id,
+                        brandNames: med.brandNames,
+                        genericName: med.genericName,
+                        category: med.category,
+                        form: med.form,
+                        hazardFlags: disposalInfo.hazardFlags,
+                        disposalMethods: disposalInfo.disposalMethods,
+                        warnings: disposalInfo.warnings,
+                        environmentalRisk: disposalInfo.environmentalRisk,
+                        didYouKnow: disposalInfo.didYouKnow,
+                      };
+                      onDetection(medicine, 100, med.brandNames[0], med.imageUrl);
+                    } catch (err: any) {
+                      setError(err.message || 'Failed to load medicine information');
+                    } finally {
+                      setIsProcessing(false);
+                    }
+                  }}
+                  disabled={!selectedMedicine || isProcessing}
+                >
+                  {isProcessing ? (
+                    <>
+                      <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                      Loading...
+                    </>
+                  ) : (
+                    'Add Medicine'
+                  )}
+                </Button>
+              </div>
+            ) : (
+              <>
+                {/* Upload Area */}
+                <div className="border-2 border-dashed border-primary/30 rounded-3xl p-8 bg-primary/5">
+                  <div className="text-center">
+                    <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                      <Camera className="h-8 w-8 text-primary" />
+                    </div>
+                    <h3 className="text-lg font-semibold mb-2">Scan Medicine Package</h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Take a photo or upload an image of your medication
+                    </p>
+                    <div className="flex gap-3 justify-center">
                   {/* Camera Input */}
                   <input
                     ref={cameraInputRef}
@@ -312,34 +383,8 @@ const ImageScanner = ({ onDetection, onMultipleDetections }: ImageScannerProps) 
                 </div>
               </div>
             </div>
-
-            {/* Sample Images */}
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-primary" />
-                <p className="text-sm font-medium">Try with sample images</p>
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                {sampleImages.map((sample, i) => (
-                  <motion.button
-                    key={i}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => handleSampleClick(sample)}
-                    className="relative aspect-square rounded-xl overflow-hidden border-2 border-transparent hover:border-primary transition-colors"
-                  >
-                    <img 
-                      src={sample.url} 
-                      alt={sample.name}
-                      className="w-full h-full object-cover"
-                    />
-                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-2">
-                      <p className="text-xs text-white font-medium">{sample.name}</p>
-                    </div>
-                  </motion.button>
-                ))}
-              </div>
-            </div>
+              </>
+            )}
           </motion.div>
         ) : (
           <motion.div

@@ -56,8 +56,12 @@ const Scan = () => {
     setStep('report');
   };
 
-  const handleConfirmAction = () => {
+  const handleConfirmAction = (fishType?: string) => {
     if (currentMedicine) {
+      // Store the expected fish type for consistency
+      if (fishType) {
+        setExpectedFishType(fishType);
+      }
       // Add to scan history
       addScan({
         medicineId: currentMedicine.id,
@@ -124,7 +128,7 @@ const Scan = () => {
   };
 
   return (
-    <div className="min-h-screen pb-24 md:pt-20 bg-gradient-to-b from-muted/30 to-background">
+    <div className="min-h-screen pb-28 pt-4 md:pt-24 bg-gradient-to-b from-muted/30 to-background">
       {/* Header */}
       <header className="px-4 pt-6 pb-4">
         <div className="max-w-md mx-auto flex items-center gap-4">

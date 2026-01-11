@@ -4,6 +4,7 @@ import { Video, Upload, X, Loader2, Check, AlertCircle, Play, Pause } from 'luci
 import { Button } from '@/components/ui/button';
 import { Medicine } from '@/data/medicineDatabase';
 import { identifyMedicinesFromVideo, MedicineInfo } from '@/services/openai';
+import { getMedicineImage } from '@/data/popularMedicines';
 import { cn } from '@/lib/utils';
 
 // Convert MedicineInfo to Medicine format
@@ -84,12 +85,16 @@ const VideoScanner = ({ onDetections }: VideoScannerProps) => {
       }
 
       // Convert results to DetectedMedicine format
-      const detected: DetectedMedicine[] = results.map((result, index) => ({
-        medicine: convertMedicineInfo(result.medicine),
-        confidence: result.confidence,
-        detectedText: result.detectedText,
-        imageUrl: thumbnail, // Use thumbnail for display (or we could extract specific frames)
-      }));
+      const detected: DetectedMedicine[] = results.map((result, index) => {
+        // Try to get stock image for popular medications
+        const stockImage = getMedicineImage(result.medicine.brandNames[0], result.medicine.genericName);
+        return {
+          medicine: convertMedicineInfo(result.medicine),
+          confidence: result.confidence,
+          detectedText: result.detectedText,
+          imageUrl: stockImage || thumbnail || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2VlZSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTgiIGZpbGw9IiM5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj7wn5CvPC90ZXh0Pjwvc3ZnPg==', // Question mark fallback
+        };
+      });
 
       setDetectedMedicines(detected);
       setIsProcessing(false);

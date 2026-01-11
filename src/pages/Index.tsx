@@ -21,7 +21,7 @@ const Index = () => {
   const unlockedAchievements = achievements.filter(a => a.unlockedAt);
 
   return (
-    <div className="min-h-screen pb-24 md:pt-20">
+    <div className="min-h-screen pb-28 pt-4 md:pt-24">
       {/* Hero Section */}
       <section className="ocean-gradient px-4 pt-12 pb-16 md:pt-16">
         <div className="max-w-md mx-auto">

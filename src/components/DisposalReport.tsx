@@ -135,25 +135,48 @@ const DisposalReport = ({ medicine, confidence, detectedText, imageUrl, onConfir
     // Load impact information
     const loadImpactInfo = async () => {
       try {
+        // Safety check - ensure all required properties exist
+        if (!medicine.environmentalRisk || !medicine.brandNames || !medicine.genericName || !medicine.hazardFlags) {
+          console.warn('Medicine missing required properties, using fallback values');
+          setImpactInfo({
+            impactDescription: 'Environmental impact information unavailable.',
+            fishThatWouldDie: 'mackerel',
+            fishYouWillSave: 'mackerel',
+          });
+          setFishPreview('mackerel');
+          return;
+        }
+
         const impact = await getImproperDisposalImpact(
-          medicine.environmentalRisk.level,
+          medicine.environmentalRisk.level || 'low',
           medicine.brandNames[0],
           medicine.genericName,
-          medicine.hazardFlags.antibiotic
+          medicine.hazardFlags.antibiotic || false
         );
         setImpactInfo(impact);
         
-        // Get fish preview
-        const fishType = await selectFishForImpact(
-          medicine.environmentalRisk.level,
-          medicine.brandNames[0],
-          medicine.genericName,
-          medicine.hazardFlags.antibiotic,
-          medicine.hazardFlags.controlled
-        );
+        // Get fish preview - ALWAYS use the same fish type from impactInfo to ensure perfect sync
+        // This ensures the fish shown in preview is exactly the same as the one added to aquarium
+        let fishType = impact.fishYouWillSave || impact.fishThatWouldDie;
+        if (!fishType) {
+          fishType = await selectFishForImpact(
+            medicine.environmentalRisk.level || 'low',
+            medicine.brandNames[0],
+            medicine.genericName,
+            medicine.hazardFlags.antibiotic || false,
+            medicine.hazardFlags.controlled || false
+          );
+        }
         setFishPreview(fishType);
       } catch (error) {
         console.error('Failed to load impact info:', error);
+        // Set fallback values to prevent blank screen
+        setImpactInfo({
+          impactDescription: 'Environmental impact information unavailable.',
+          fishThatWouldDie: 'mackerel',
+          fishYouWillSave: 'mackerel',
+        });
+        setFishPreview('mackerel');
       }
     };
 
@@ -192,6 +215,15 @@ const DisposalReport = ({ medicine, confidence, detectedText, imageUrl, onConfir
     }
   };
 
+  // Safety check - ensure medicine has required properties
+  if (!medicine || !medicine.brandNames || !medicine.disposalMethods) {
+    return (
+      <div className="w-full max-w-md mx-auto p-6 bg-card rounded-3xl">
+        <p className="text-destructive">Error: Invalid medicine data</p>
+      </div>
+    );
+  }
+
   const PrimaryIcon = getMethodIcon(medicine.disposalMethods.primary.icon);
 
   return (
@@ -229,6 +261,10 @@ const DisposalReport = ({ medicine, confidence, detectedText, imageUrl, onConfir
                 src={imageUrl} 
                 alt={medicine.brandNames[0]}
                 className="w-full h-32 object-contain rounded-lg"
+                onError={(e) => {
+                  // Hide image if it fails to load (e.g., CORS issue with external URLs)
+                  (e.target as HTMLImageElement).style.display = 'none';
+                }}
               />
             </div>
           )}
@@ -280,32 +316,34 @@ const DisposalReport = ({ medicine, confidence, detectedText, imageUrl, onConfir
           )}
 
           {/* Environmental Impact */}
-          <div className="bg-gradient-to-br from-primary/5 to-accent/5 rounded-2xl p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Leaf className="h-4 w-4 text-primary" />
-              <p className="font-semibold">Environmental Impact</p>
-              <span className={cn('text-sm font-medium ml-auto', getRiskColor(medicine.environmentalRisk.level))}>
-                {medicine.environmentalRisk.level.toUpperCase()} Risk
-              </span>
-            </div>
-            <p className="text-sm text-muted-foreground mb-3">
-              {medicine.environmentalRisk.description}
-            </p>
-            
-            {/* Impact of Improper Disposal */}
-            {impactInfo && (
-              <div className="mt-3 pt-3 border-t border-primary/20">
-                <p className="text-xs font-semibold text-destructive mb-2">⚠️ If Disposed Improperly:</p>
-                <p className="text-xs text-muted-foreground mb-2">{impactInfo.impactDescription}</p>
-                <div className="flex items-center gap-2 mt-2">
-                  <Fish className="h-4 w-4 text-primary" />
-                  <span className="text-xs text-primary font-medium">
-                    You'll save: {impactInfo.fishYouWillSave.charAt(0).toUpperCase() + impactInfo.fishYouWillSave.slice(1)}
-                  </span>
-                </div>
+          {medicine.environmentalRisk && (
+            <div className="bg-gradient-to-br from-primary/5 to-accent/5 rounded-2xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Leaf className="h-4 w-4 text-primary" />
+                <p className="font-semibold">Environmental Impact</p>
+                <span className={cn('text-sm font-medium ml-auto', getRiskColor(medicine.environmentalRisk.level || 'low'))}>
+                  {(medicine.environmentalRisk.level || 'low').toUpperCase()} Risk
+                </span>
               </div>
-            )}
-          </div>
+              <p className="text-sm text-muted-foreground mb-3">
+                {medicine.environmentalRisk.description || 'Environmental risk information unavailable.'}
+              </p>
+              
+              {/* Impact of Improper Disposal */}
+              {impactInfo && impactInfo.fishYouWillSave && (
+                <div className="mt-3 pt-3 border-t border-primary/20">
+                  <p className="text-xs font-semibold text-destructive mb-2">⚠️ If Disposed Improperly:</p>
+                  <p className="text-xs text-muted-foreground mb-2">{impactInfo.impactDescription}</p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <Fish className="h-4 w-4 text-primary" />
+                    <span className="text-xs text-primary font-medium">
+                      You'll save: {impactInfo.fishYouWillSave.charAt(0).toUpperCase() + impactInfo.fishYouWillSave.slice(1)}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Fish Preview */}
           {fishPreview && (

@@ -1,21 +1,21 @@
 import { Link, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Home, Scan, History, Info, Presentation } from 'lucide-react';
+import { Home, Scan, History, Package, Info, Presentation } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
   { path: '/', icon: Home, label: 'Home' },
   { path: '/scan', icon: Scan, label: 'Scan' },
+  { path: '/inventory', icon: Package, label: 'Inventory' },
   { path: '/history', icon: History, label: 'History' },
   { path: '/about', icon: Info, label: 'About' },
-  { path: '/pitch', icon: Presentation, label: 'Pitch' },
 ];
 
 const Navigation = () => {
   const location = useLocation();
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 px-4 pb-4 pt-2 sm:px-6 md:bottom-auto md:top-0 md:py-4">
+    <nav className="fixed bottom-0 left-0 right-0 z-40 px-4 pb-safe sm:pb-4 pt-2 sm:px-6 md:bottom-auto md:top-0 md:py-4 md:pt-6">
       <div className="mx-auto max-w-lg">
         <div className="glass-card rounded-2xl border border-white/30 px-2 py-2 shadow-elevated backdrop-blur-xl">
           <div className="flex items-center justify-around">

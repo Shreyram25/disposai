@@ -7,6 +7,7 @@ import Navigation from "./components/Navigation";
 import Index from "./pages/Index";
 import Scan from "./pages/Scan";
 import History from "./pages/History";
+import Inventory from "./pages/Inventory";
 import About from "./pages/About";
 import Pitch from "./pages/Pitch";
 import NotFound from "./pages/NotFound";
@@ -24,6 +25,7 @@ const App = () => (
           <Route path="/" element={<Index />} />
           <Route path="/scan" element={<Scan />} />
           <Route path="/history" element={<History />} />
+          <Route path="/inventory" element={<Inventory />} />
           <Route path="/about" element={<About />} />
           <Route path="/pitch" element={<Pitch />} />
           <Route path="*" element={<NotFound />} />

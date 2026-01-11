@@ -43,12 +43,13 @@ if (!OPENAI_API_KEY) {
 }
 
 /**
- * Convert image file/URL to base64
+ * Convert image file/URL to base64 data URL
+ * Always converts to a valid format for OpenAI Vision API (PNG, JPEG, GIF, WebP)
  */
 async function imageToBase64(imageFile: File | string): Promise<string> {
   if (typeof imageFile === 'string') {
-    // If it's already a data URL, return it
-    if (imageFile.startsWith('data:')) {
+    // If it's already a data URL, validate and return it
+    if (imageFile.startsWith('data:image/')) {
       return imageFile;
     }
     // If it's a URL, fetch and convert
@@ -56,17 +57,85 @@ async function imageToBase64(imageFile: File | string): Promise<string> {
     const blob = await response.blob();
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        if (result && result.startsWith('data:image/')) {
+          resolve(result);
+        } else {
+          reject(new Error('Invalid image format from URL'));
+        }
+      };
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
   } else {
     // Convert File to base64
+    // Always use canvas conversion for better compatibility with OpenAI API
+    // This ensures images are properly formatted and valid
     return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(imageFile);
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(imageFile);
+      
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        if (!ctx) {
+          reject(new Error('Could not create canvas context'));
+          return;
+        }
+        
+        canvas.width = img.width;
+        canvas.height = img.height;
+        
+        // Draw white background for formats that don't support transparency
+        if (imageFile.type !== 'image/png') {
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        ctx.drawImage(img, 0, 0);
+        
+        // Try PNG first (preserves quality), then fallback to JPEG
+        try {
+          if (imageFile.type === 'image/png') {
+            const pngUrl = canvas.toDataURL('image/png');
+            if (pngUrl && pngUrl.startsWith('data:image/png;base64,')) {
+              resolve(pngUrl);
+              return;
+            }
+          }
+          
+          // Fallback to JPEG (most compatible with OpenAI)
+          const jpegUrl = canvas.toDataURL('image/jpeg', 0.95);
+          if (jpegUrl && jpegUrl.startsWith('data:image/jpeg;base64,')) {
+            resolve(jpegUrl);
+          } else {
+            reject(new Error('Failed to convert image to valid format'));
+          }
+        } catch (error) {
+          console.error('Canvas conversion error:', error);
+          reject(new Error('Canvas conversion failed'));
+        }
+      };
+      
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        // Fallback: try FileReader as last resort
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const result = reader.result as string;
+          if (result && result.startsWith('data:image/') && result.includes(';base64,')) {
+            resolve(result);
+          } else {
+            reject(new Error('Invalid image file - could not be read'));
+          }
+        };
+        reader.onerror = () => reject(new Error('Failed to read image file'));
+        reader.readAsDataURL(imageFile);
+      };
+      
+      img.src = objectUrl;
     });
   }
 }
@@ -126,7 +195,17 @@ async function callGPT(
     return data.choices[0]?.message?.content || '';
   } catch (error) {
     console.error('GPT API call failed:', error);
-    throw error;
+    
+    // Provide more informative error messages
+    if (error instanceof TypeError && error.message.includes('Load failed')) {
+      throw new Error('Network error: Unable to connect to OpenAI API. Please check your internet connection and try again.');
+    }
+    
+    if (error instanceof Error) {
+      throw error;
+    }
+    
+    throw new Error('Failed to call OpenAI API. Please try again.');
   }
 }
 
@@ -178,6 +257,14 @@ If the medicine cannot be identified, set id to "unknown" and provide general sa
   try {
     // Convert image to base64
     const base64Image = await imageToBase64(imageFile);
+    
+    // Validate the base64 image format
+    if (!base64Image || !base64Image.startsWith('data:image/')) {
+      throw new Error('Invalid image format: image conversion failed');
+    }
+    
+    // Log for debugging (remove in production)
+    console.log('Image format:', base64Image.substring(0, 50) + '...');
     
     const userPrompt = `Analyze this medicine package image${detectedText ? ` and the detected text: "${detectedText}"` : ''}. 
 
@@ -319,15 +406,22 @@ Identify this medication and provide disposal information. Be specific about:
 }
 
 /**
- * Get disposal information for a medicine using GPT
+ * Get disposal information for a medicine with full details
  */
-export async function getDisposalInfo(medicineName: string, genericName: string): Promise<MedicineInfo> {
+export async function getDisposalInfoForMedicine(
+  medicineName: string,
+  genericName: string,
+  category: string,
+  form: string
+): Promise<MedicineInfo> {
   const systemPrompt = `You are a pharmaceutical waste disposal expert. Provide detailed, accurate disposal information for medications.
 Return a JSON object with the same structure as the identifyMedicine function.`;
 
   const userPrompt = `Provide disposal information for:
 - Medicine: ${medicineName}
 - Generic Name: ${genericName}
+- Category: ${category || 'Unknown'}
+- Form: ${form || 'Unknown'}
 
 Include:
 1. Proper disposal methods - choose the SIMPLEST effective method. Only use hospital take-back for antibiotics/controlled substances. For simple medicines, recommend household disposal (coffee grounds method).
@@ -345,11 +439,52 @@ Base recommendations on UAE/local regulations and WHO guidelines.`;
     ]);
 
     const disposalInfo = JSON.parse(response) as MedicineInfo;
-    return disposalInfo;
+    
+    // Validate and ensure all required properties are present
+    const validatedInfo: MedicineInfo = {
+      id: disposalInfo.id || `${medicineName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`,
+      brandNames: disposalInfo.brandNames && Array.isArray(disposalInfo.brandNames) && disposalInfo.brandNames.length > 0
+        ? disposalInfo.brandNames
+        : [medicineName],
+      genericName: disposalInfo.genericName || genericName || 'Unknown',
+      category: disposalInfo.category || category || 'Unknown',
+      form: disposalInfo.form || (form as any) || 'other',
+      hazardFlags: disposalInfo.hazardFlags || {
+        controlled: false,
+        antibiotic: false,
+        cytotoxic: false,
+        hormonal: false,
+        flushable: false,
+      },
+      disposalMethods: disposalInfo.disposalMethods || getUnknownMedicineResponse().disposalMethods,
+      warnings: Array.isArray(disposalInfo.warnings) ? disposalInfo.warnings : [],
+      environmentalRisk: disposalInfo.environmentalRisk || {
+        level: 'medium',
+        description: 'Environmental impact information unavailable.',
+      },
+      didYouKnow: disposalInfo.didYouKnow || 'Proper disposal helps protect our environment.',
+    };
+    
+    return validatedInfo;
   } catch (error) {
     console.error('Failed to get disposal info:', error);
-    return getUnknownMedicineResponse();
+    // Return a validated unknown response with the provided medicine name
+    const unknownResponse = getUnknownMedicineResponse();
+    return {
+      ...unknownResponse,
+      brandNames: [medicineName],
+      genericName: genericName || 'Unknown',
+      category: category || 'Unknown',
+      form: (form as any) || 'other',
+    };
   }
+}
+
+/**
+ * Get disposal information for a medicine using GPT (legacy function)
+ */
+export async function getDisposalInfo(medicineName: string, genericName: string): Promise<MedicineInfo> {
+  return getDisposalInfoForMedicine(medicineName, genericName, '', 'other');
 }
 
 /**
@@ -368,41 +503,9 @@ export async function findNearbyHospitals(
   acceptsAll: boolean;
   hours: string;
 }>> {
-  // Try Google Maps API first if we have coordinates
-  if (latitude && longitude) {
-    try {
-      const { findNearbyPharmaciesWithGoogleMaps } = await import('./googleMaps');
-      // Search for hospitals instead
-      const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-      if (GOOGLE_MAPS_API_KEY) {
-        const searchUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?` +
-          `location=${latitude},${longitude}` +
-          `&radius=5000` +
-          `&type=hospital` +
-          `&keyword=government hospital DHA` +
-          `&key=${GOOGLE_MAPS_API_KEY}`;
-
-        const response = await fetch(searchUrl);
-        if (response.ok) {
-          const data = await response.json();
-          if (data.results && data.results.length > 0) {
-            return data.results.slice(0, 5).map((place: any, idx: number) => ({
-              id: idx + 1,
-              name: place.name,
-              address: place.vicinity || place.formatted_address || 'Address not available',
-              distance: 'N/A',
-              acceptsAll: true,
-              hours: 'Check with hospital',
-            }));
-          }
-        }
-      }
-    } catch (error) {
-      console.warn('Google Maps API failed, falling back to GPT:', error);
-    }
-  }
-
-  // Fallback to GPT-based search
+  // Note: Google Maps Places API cannot be called directly from browser due to CORS restrictions
+  // We use GPT to find hospitals, which works reliably without CORS issues
+  // GPT-based search
   const systemPrompt = `You are a location finder for Dubai Health Authority's "Clean Your Medicine Cabinet" drive. Return a JSON array of nearby government hospitals that participate in medication take-back.
 Format: [{"id": 1, "name": "Hospital Name", "address": "Full address", "distance": "X.X km", "acceptsAll": true, "hours": "9:00 AM - 9:00 PM"}]`;
 
@@ -436,7 +539,8 @@ Include major government hospitals like Dubai Hospital, Rashid Hospital, Latifa 
     // Fallback to default locations
     return getDefaultLocations();
   } catch (error) {
-    console.error('Failed to find pharmacies:', error);
+    console.error('Failed to find hospitals:', error);
+    // Return default hospital locations as fallback
     return getDefaultLocations();
   }
 }
@@ -779,9 +883,11 @@ export async function getImproperDisposalImpact(
 
 Return JSON: {
   "impactDescription": "Detailed description of environmental damage",
-  "fishThatWouldDie": "Type of fish that would be harmed (e.g., 'mackerel', 'salmon', 'tuna')",
-  "fishYouWillSave": "Type of fish that will be saved by proper disposal (same as fishThatWouldDie)"
-}`;
+  "fishThatWouldDie": "Type of fish that would be harmed (e.g., 'mackerel', 'salmon', 'tuna', 'shark', 'whale')",
+  "fishYouWillSave": "Type of fish that will be saved by proper disposal - MUST be the EXACT SAME as fishThatWouldDie"
+}
+
+IMPORTANT: fishYouWillSave MUST be identical to fishThatWouldDie - they represent the same fish species.`;
 
   const userPrompt = `Medicine: ${medicineName} (${genericName})
 Environmental Risk: ${environmentalRisk}
@@ -909,31 +1015,197 @@ Return only the fish type name.`;
  * Default locations fallback
  */
 function getDefaultLocations() {
+  // Default DHA government hospitals for medication take-back
   return [
     {
       id: 1,
-      name: 'Life Pharmacy - Dubai Mall',
-      address: 'The Dubai Mall, Ground Floor, Dubai',
-      distance: '2.3 km',
+      name: 'Dubai Hospital',
+      address: 'Al Khaleej Road, Al Baraha, Dubai',
+      distance: 'N/A',
       acceptsAll: true,
-      hours: '10:00 AM - 10:00 PM',
+      hours: '24/7',
     },
     {
       id: 2,
-      name: 'Aster Pharmacy - JBR',
-      address: 'Jumeirah Beach Residence, Dubai',
-      distance: '4.1 km',
+      name: 'Rashid Hospital',
+      address: 'Umm Hurair 2, Dubai',
+      distance: 'N/A',
       acceptsAll: true,
-      hours: '9:00 AM - 11:00 PM',
+      hours: '24/7',
     },
     {
       id: 3,
-      name: 'Dubai Health Authority Clinic',
-      address: 'Al Barsha Health Center, Dubai',
-      distance: '5.8 km',
+      name: 'Latifa Hospital',
+      address: 'Al Jaddaf, Dubai',
+      distance: 'N/A',
       acceptsAll: true,
-      hours: '8:00 AM - 8:00 PM',
+      hours: '24/7',
+    },
+    {
+      id: 4,
+      name: 'Al Jalila Children\'s Specialty Hospital',
+      address: 'Al Jaddaf, Dubai',
+      distance: 'N/A',
+      acceptsAll: true,
+      hours: '9:00 AM - 9:00 PM',
     },
   ];
+}
+
+/**
+ * Extract expiry date from medicine package image
+ */
+export async function extractExpiryDateFromImage(imageFile: File | string): Promise<{
+  expiryDate: string | null;
+  confidence: 'high' | 'medium' | 'low';
+  detectedText?: string;
+}> {
+  const systemPrompt = `You are a pharmaceutical expert. Analyze the medicine package image and extract the expiry date or expiration date.
+Return a JSON object with the following structure:
+{
+  "expiryDate": "YYYY-MM-DD format (e.g., 2025-12-31) or null if not found",
+  "confidence": "high|medium|low",
+  "detectedText": "The exact text you found that represents the expiry date"
+}
+
+Look for:
+- "Expiry Date", "Exp Date", "EXP", "Use By", "Best Before"
+- Dates in formats like: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, DD-MM-YYYY
+- Month names: Jan, Feb, Mar, etc.
+- If no expiry date is found, return null for expiryDate and confidence "low"`;
+
+  try {
+    // Convert image to base64 - use EXACT same logic as identifyMedicineFromImage
+    const base64Image = await imageToBase64(imageFile);
+    
+    // Validate the base64 image format - EXACT same validation as identifyMedicineFromImage
+    if (!base64Image || !base64Image.startsWith('data:image/')) {
+      throw new Error('Invalid image format: image conversion failed');
+    }
+    
+    // Ensure base64 string is properly formatted
+    if (!base64Image.includes(';base64,')) {
+      throw new Error('Invalid base64 format: missing base64 prefix');
+    }
+    
+    // Log for debugging (same as identifyMedicineFromImage)
+    console.log('Expiry image format:', base64Image.substring(0, 50) + '...');
+    
+    const userPrompt = `Analyze this medicine package image and find the expiry date or expiration date. 
+Look carefully at all text on the package, especially near labels like "Expiry", "Exp", "Use By", or "Best Before".
+Return the date in YYYY-MM-DD format. If you cannot find an expiry date, return null.`;
+
+    // Use EXACT same message structure as identifyMedicineFromImage
+    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string } }> }> = [
+      { role: 'system', content: systemPrompt },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: userPrompt,
+          },
+          {
+            type: 'image_url',
+            image_url: {
+              url: base64Image,
+            },
+          },
+        ],
+      },
+    ];
+
+    // Use EXACT same model and temperature as identifyMedicineFromImage
+    const response = await callGPT(messages, 'gpt-4o', 0.3);
+    const result = JSON.parse(response);
+    
+    return {
+      expiryDate: result.expiryDate || null,
+      confidence: result.confidence || 'low',
+      detectedText: result.detectedText,
+    };
+  } catch (error) {
+    console.error('Failed to extract expiry date:', error);
+    return {
+      expiryDate: null,
+      confidence: 'low',
+    };
+  }
+}
+
+/**
+ * Extract medicine info and expiry date from video
+ */
+export async function extractMedicineAndExpiryFromVideo(videoFile: File): Promise<{
+  medicine: MedicineInfo | null;
+  expiryDate: string | null;
+  medicineConfidence: 'high' | 'medium' | 'low';
+  expiryConfidence: 'high' | 'medium' | 'low';
+  missingInfo: 'medicine' | 'expiry' | 'both' | null;
+}> {
+  const systemPrompt = `You are a pharmaceutical expert. Analyze video frames showing a medicine package and extract:
+1. Medicine identification (name, generic name, category, etc.)
+2. Expiry date
+
+Return a JSON object:
+{
+  "medicine": { MedicineInfo object } or null if medicine cannot be identified,
+  "expiryDate": "YYYY-MM-DD" or null if expiry date not found,
+  "medicineConfidence": "high|medium|low",
+  "expiryConfidence": "high|medium|low",
+  "missingInfo": "medicine" if medicine not found, "expiry" if expiry not found, "both" if neither found, null if both found
+}`;
+
+  try {
+    const frames = await extractKeyFrames(videoFile, 15);
+    
+    if (frames.length === 0) {
+      throw new Error('Failed to extract frames from video');
+    }
+
+    const userPrompt = `Analyze these video frames of a medicine package. Extract:
+1. Medicine identification (brand name, generic name, category, form, hazard flags)
+2. Expiry date (look for "Expiry", "Exp", "Use By", "Best Before" labels)
+
+IMPORTANT: 
+- If you cannot clearly see the medicine name/identification, set medicine to null and medicineConfidence to "low"
+- If you cannot clearly see the expiry date, set expiryDate to null and expiryConfidence to "low"
+- Set missingInfo accordingly: "medicine" if medicine missing, "expiry" if expiry missing, "both" if both missing, null if both found
+
+Be very strict - only return high confidence if you can clearly see the information.`;
+
+    const content: Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string } }> = [
+      { type: 'text', text: userPrompt },
+      ...frames.map(frame => ({
+        type: 'image_url' as const,
+        image_url: { url: frame },
+      })),
+    ];
+
+    const messages = [
+      { role: 'system' as const, content: systemPrompt },
+      { role: 'user' as const, content },
+    ];
+
+    const response = await callGPT(messages, 'gpt-4o', 0.3);
+    const result = JSON.parse(response);
+    
+    return {
+      medicine: result.medicine || null,
+      expiryDate: result.expiryDate || null,
+      medicineConfidence: result.medicineConfidence || 'low',
+      expiryConfidence: result.expiryConfidence || 'low',
+      missingInfo: result.missingInfo || null,
+    };
+  } catch (error) {
+    console.error('Failed to extract medicine and expiry from video:', error);
+    return {
+      medicine: null,
+      expiryDate: null,
+      medicineConfidence: 'low',
+      expiryConfidence: 'low',
+      missingInfo: 'both',
+    };
+  }
 }
 
