@@ -1,65 +1,33 @@
-# Firebase Firestore Setup Instructions
+# Firebase Remote Config Setup Instructions
 
-## Step 1: Enable Firestore Database
-1. Go to https://console.firebase.google.com/project/plenum-2026
-2. Click on **"Firestore Database"** in the left sidebar
-3. Click **"Create database"**
-4. Choose **"Start in test mode"** (for now)
-5. Select a location (choose closest to your users)
-6. Click **"Done"**
+## ✅ You've Already Completed This!
 
-## Step 2: Add API Keys to Firestore
-1. In Firestore Database, click **"Start collection"**
-2. Collection ID: `config`
-3. Click **"Next"**
-4. Document ID: `api-keys`
-5. Add fields:
-   - Field: `openai_api_key`, Type: `string`, Value: `[YOUR_OPENAI_API_KEY_HERE]`
-   - Field: `google_maps_api_key`, Type: `string`, Value: `[YOUR_GOOGLE_MAPS_API_KEY_HERE]`
-6. Click **"Save"**
+Great! I can see you've already set up Firebase Remote Config with your API keys:
 
-**Note**: Replace the placeholder values with your actual API keys from your local `.env` file.
+- ✅ `openai_api_key`: Added
+- ✅ `google_maps_api_key`: Added
 
-## Step 3: Update Security Rules (Important!)
-1. Go to **"Rules"** tab in Firestore
-2. Replace the rules with:
+## What You Did:
+1. Found Remote Config in your Firebase Console
+2. Added the `openai_api_key` parameter with your OpenAI API key
+3. Added the `google_maps_api_key` parameter with your Google Maps API key
+4. Published the changes
 
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // Allow read access to config collection for API keys
-    match /config/{document} {
-      allow read: if true;
-      allow write: if false; // Only allow writes from Firebase Console
-    }
-    
-    // Deny all other access
-    match /{document=**} {
-      allow read, write: if false;
-    }
-  }
-}
-```
+## How It Works:
+- **Production**: Your deployed app loads API keys from Firebase Remote Config
+- **Development**: Falls back to local `.env` file when Remote Config fails
+- **Security**: API keys are served securely from Firebase, never exposed in source code
+- **Updates**: You can update keys anytime without redeploying your app
 
-3. Click **"Publish"**
+## Next Steps:
+Your app is now ready! The GitHub Actions workflow will automatically:
+1. Build your app
+2. Deploy to GitHub Pages at: **https://shreyram25.github.io/disposai/**
+3. Load API keys from Firebase Remote Config in production
 
-## Step 4: Your Firestore Structure Should Look Like:
-```
-📁 config (collection)
-  📄 api-keys (document)
-    🔑 openai_api_key: "[YOUR_OPENAI_KEY]"
-    🗺️ google_maps_api_key: "[YOUR_GOOGLE_MAPS_KEY]"
-```
-
-## Step 5: Test the Setup
-Your app will now:
-- Load API keys from Firestore in production
-- Fall back to local .env variables during development
-- Keep your keys secure and updatable
-
-## Security Benefits
-- API keys are stored securely in Firestore
-- Keys are served over HTTPS
-- You can update keys without redeploying
-- Read-only access prevents unauthorized changes
+## Testing:
+When you run the app locally with `npm run dev`, you'll see console logs showing:
+- ✅ Firebase Remote Config initialized successfully
+- 🔑 OpenAI Key loaded: sk-proj-9xg...
+- 🗺️ Google Maps Key loaded: AIzaSyBaJ...
+- 🎉 All API keys loaded successfully from Firebase Remote Config!
