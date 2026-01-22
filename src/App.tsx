@@ -27,6 +27,7 @@ import About from "./pages/About";
 import Pitch from "./pages/Pitch";
 import NotFound from "./pages/NotFound";
 import ApiKeyService from "./services/apiKeys";
+import { testFirebaseConfig } from "./utils/testFirebaseConfig";
 
 const queryClient = new QueryClient();
 
@@ -38,6 +39,11 @@ const App = () => {
         const apiKeyService = ApiKeyService.getInstance();
         await apiKeyService.initialize();
         console.log('API keys initialized successfully');
+        
+        // Test the configuration in development
+        if (import.meta.env.DEV) {
+          await testFirebaseConfig();
+        }
       } catch (error) {
         console.error('Failed to initialize API keys:', error);
       }
