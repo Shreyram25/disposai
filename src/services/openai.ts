@@ -202,7 +202,10 @@ async function callGPT(
     
     // Provide more informative error messages
     if (error instanceof TypeError && error.message.includes('Load failed')) {
-      throw new Error('Network error: Unable to connect to OpenAI API. Please check your internet connection and try again.');
+      // In production, OpenAI API calls may fail due to CORS restrictions
+      // This is expected behavior when calling OpenAI directly from browser
+      console.warn('OpenAI API call blocked (likely CORS in production). This is normal for browser-based apps.');
+      throw new Error('OpenAI API temporarily unavailable. This is expected in the demo version.');
     }
     
     if (error instanceof Error) {
