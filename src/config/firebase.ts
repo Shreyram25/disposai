@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getRemoteConfig, fetchAndActivate, getValue } from 'firebase/remote-config';
+import { getFirestore, doc, getDoc } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: "AIzaSyB1qs3bd-Shbu2_cZ56A0CWDrCzGNPH-ng",
@@ -13,19 +13,8 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Remote Config
-const remoteConfig = getRemoteConfig(app);
+// Initialize Firestore
+const db = getFirestore(app);
 
-// Set default values
-remoteConfig.defaultConfig = {
-  'openai_api_key': '',
-  'google_maps_api_key': ''
-};
-
-// Configure Remote Config
-remoteConfig.settings = {
-  minimumFetchIntervalMillis: 3600000, // 1 hour
-};
-
-export { remoteConfig, fetchAndActivate, getValue };
+export { db, doc, getDoc };
 export default app;

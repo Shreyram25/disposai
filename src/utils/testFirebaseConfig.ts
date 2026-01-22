@@ -1,11 +1,11 @@
 import ApiKeyService from '../services/apiKeys';
 
 /**
- * Test Firebase Remote Config setup
+ * Test Firebase Firestore setup
  * Run this to verify your API keys are loading correctly
  */
 export async function testFirebaseConfig(): Promise<void> {
-  console.log('🔥 Testing Firebase Remote Config...');
+  console.log('🔥 Testing Firebase Firestore...');
   
   try {
     const apiKeyService = ApiKeyService.getInstance();
@@ -14,18 +14,18 @@ export async function testFirebaseConfig(): Promise<void> {
     const openaiKey = apiKeyService.getOpenAIKey();
     const googleMapsKey = apiKeyService.getGoogleMapsKey();
     
-    console.log('✅ Firebase Remote Config initialized successfully');
+    console.log('✅ Firebase Firestore initialized successfully');
     console.log('🔑 OpenAI Key loaded:', openaiKey ? `${openaiKey.substring(0, 10)}...` : 'NOT FOUND');
     console.log('🗺️ Google Maps Key loaded:', googleMapsKey ? `${googleMapsKey.substring(0, 10)}...` : 'NOT FOUND');
     
     if (!openaiKey) {
-      console.error('❌ OpenAI API key not found in Remote Config');
-      console.log('💡 Make sure you added "openai_api_key" parameter in Firebase Remote Config');
+      console.error('❌ OpenAI API key not found in Firestore');
+      console.log('💡 Make sure you added API keys to Firestore collection "config" document "api-keys"');
     }
     
     if (!googleMapsKey) {
-      console.error('❌ Google Maps API key not found in Remote Config');
-      console.log('💡 Make sure you added "google_maps_api_key" parameter in Firebase Remote Config');
+      console.error('❌ Google Maps API key not found in Firestore');
+      console.log('💡 Make sure you added API keys to Firestore collection "config" document "api-keys"');
     }
     
     if (openaiKey && googleMapsKey) {
@@ -33,7 +33,7 @@ export async function testFirebaseConfig(): Promise<void> {
     }
     
   } catch (error) {
-    console.error('❌ Firebase Remote Config test failed:', error);
+    console.error('❌ Firebase Firestore test failed:', error);
     console.log('💡 Falling back to local environment variables...');
     
     // Test fallback to local env
