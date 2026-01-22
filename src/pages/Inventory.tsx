@@ -7,6 +7,7 @@ import InventoryScanner from '@/components/InventoryScanner';
 import { getDisposalInfoForMedicine } from '@/services/openai';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
+import { getImageWithFallback } from '@/utils/placeholders';
 
 const Inventory = () => {
   const navigate = useNavigate();
@@ -260,9 +261,13 @@ const Inventory = () => {
                   >
                     <div className="flex gap-4">
                       <img
-                        src={item.imageUrl}
+                        src={getImageWithFallback(item.imageUrl)}
                         alt={item.medicineName}
                         className="w-20 h-20 rounded-xl object-cover"
+                        onError={(e) => {
+                          // Fallback to placeholder if image fails
+                          (e.target as HTMLImageElement).src = getImageWithFallback(null);
+                        }}
                       />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2 mb-1">
@@ -306,13 +311,17 @@ const Inventory = () => {
                         )}
 
                         <Button
-                          variant="ghost"
+                          variant="destructive"
                           size="sm"
                           className="mt-2 w-full"
-                          onClick={() => removeItem(item.id)}
+                          onClick={() => {
+                            if (confirm(`Remove ${item.medicineName} from inventory? This action cannot be undone.`)) {
+                              removeItem(item.id);
+                            }
+                          }}
                         >
                           <Trash2 className="h-4 w-4 mr-2" />
-                          Remove
+                          Remove Medicine
                         </Button>
                       </div>
                     </div>

@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Medicine } from '@/data/medicineDatabase';
 import { findNearbyHospitals, getImproperDisposalImpact, selectFishForImpact } from '@/services/openai';
 import { cn } from '@/lib/utils';
+import { getImageWithFallback } from '@/utils/placeholders';
 
 interface DisposalReportProps {
   medicine: Medicine;
@@ -255,19 +256,17 @@ const DisposalReport = ({ medicine, confidence, detectedText, imageUrl, onConfir
           </div>
 
           {/* Medicine Image */}
-          {imageUrl && (
-            <div className="mt-4 bg-white/10 rounded-xl p-2">
-              <img 
-                src={imageUrl} 
-                alt={medicine.brandNames[0]}
-                className="w-full h-32 object-contain rounded-lg"
-                onError={(e) => {
-                  // Hide image if it fails to load (e.g., CORS issue with external URLs)
-                  (e.target as HTMLImageElement).style.display = 'none';
-                }}
-              />
-            </div>
-          )}
+          <div className="mt-4 bg-white/10 rounded-xl p-2">
+            <img 
+              src={getImageWithFallback(imageUrl)} 
+              alt={medicine.brandNames[0]}
+              className="w-full h-32 object-contain rounded-lg"
+              onError={(e) => {
+                // Fallback to placeholder if image fails to load
+                (e.target as HTMLImageElement).src = getImageWithFallback(null);
+              }}
+            />
+          </div>
         </div>
 
         {/* Content */}

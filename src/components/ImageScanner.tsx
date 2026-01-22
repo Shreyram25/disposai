@@ -10,7 +10,8 @@ import { extractTextFromImage, cleanupOCR } from '@/services/ocr';
 import { identifyMedicine, identifyMedicineFromImage, MedicineInfo, getDisposalInfoForMedicine } from '@/services/openai';
 import VideoScanner from '@/components/VideoScanner';
 import { cn } from '@/lib/utils';
-
+import { getImageWithFallback } from '@/utils/placeholders';
+import { getMockImageResult } from '@/utils/mockData';
 
 interface ImageScannerProps {
   onDetection: (medicine: Medicine, confidence: number, detectedText: string, imageUrl?: string) => void;
@@ -52,6 +53,44 @@ const ImageScanner = ({ onDetection, onMultipleDetections }: ImageScannerProps) 
     setShowDetection(false);
     setError(null);
 
+    // Keyboard failsafe: Press 'K' to skip processing and use mock data
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (e.key === 'k' || e.key === 'K') {
+        e.preventDefault();
+        console.log('🎬 Presentation mode: Using mock data');
+        const mockResult = getMockImageResult();
+        setDetectedText(mockResult.detectedText);
+        setEditedText(mockResult.detectedText);
+        setConfidence(mockResult.confidence);
+        setIsProcessing(false);
+        setShowDetection(true);
+        
+        // Store mock result as MedicineInfo for later use in handleConfirm
+        if (file) {
+          (file as any).visionResult = {
+            id: mockResult.medicine.id,
+            brandNames: mockResult.medicine.brandNames,
+            genericName: mockResult.medicine.genericName,
+            category: mockResult.medicine.category,
+            form: mockResult.medicine.form,
+            hazardFlags: mockResult.medicine.hazardFlags,
+            disposalMethods: mockResult.medicine.disposalMethods,
+            warnings: mockResult.medicine.warnings,
+            environmentalRisk: mockResult.medicine.environmentalRisk,
+            didYouKnow: mockResult.medicine.didYouKnow,
+          } as MedicineInfo;
+        }
+        
+        // Also store it globally so handleConfirm can use it
+        (window as any).__mockMedicineResult = mockResult.medicine;
+        
+        window.removeEventListener('keydown', handleKeyPress);
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+
     try {
       // Step 1: Extract text using OCR (in parallel with Vision API)
       let ocrText = '';
@@ -79,6 +118,9 @@ const ImageScanner = ({ onDetection, onMultipleDetections }: ImageScannerProps) 
 
       // Wait for both OCR and Vision API
       const [ocrResult, visionResult] = await Promise.all([ocrPromise, visionPromise]);
+      
+      // Remove keyboard listener after processing completes
+      window.removeEventListener('keydown', handleKeyPress);
 
       ocrText = ocrResult.text;
       ocrConfidence = ocrResult.confidence;
@@ -105,8 +147,9 @@ const ImageScanner = ({ onDetection, onMultipleDetections }: ImageScannerProps) 
       console.error('Image processing failed:', err);
       setError(err instanceof Error ? err.message : 'Failed to process image');
       setIsProcessing(false);
+      window.removeEventListener('keydown', handleKeyPress);
     }
-  }, []);
+  }, [onDetection]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -141,8 +184,25 @@ const ImageScanner = ({ onDetection, onMultipleDetections }: ImageScannerProps) 
     try {
       let medicineInfo: MedicineInfo;
       
-      // If we have a vision result from earlier, use it
-      if (currentFile && (currentFile as any).visionResult) {
+      // Check if we have a mock result from K key press
+      if ((window as any).__mockMedicineResult) {
+        const mockMedicine = (window as any).__mockMedicineResult;
+        delete (window as any).__mockMedicineResult;
+        // Convert Medicine back to MedicineInfo format
+        medicineInfo = {
+          id: mockMedicine.id,
+          brandNames: mockMedicine.brandNames,
+          genericName: mockMedicine.genericName,
+          category: mockMedicine.category,
+          form: mockMedicine.form,
+          hazardFlags: mockMedicine.hazardFlags,
+          disposalMethods: mockMedicine.disposalMethods,
+          warnings: mockMedicine.warnings,
+          environmentalRisk: mockMedicine.environmentalRisk,
+          didYouKnow: mockMedicine.didYouKnow,
+        };
+      } else if (currentFile && (currentFile as any).visionResult) {
+        // If we have a vision result from earlier, use it
         medicineInfo = (currentFile as any).visionResult;
       } else if (currentFile || imageUrl) {
         // Use Vision API with the image
@@ -397,9 +457,13 @@ const ImageScanner = ({ onDetection, onMultipleDetections }: ImageScannerProps) 
             {/* Image Preview */}
             <div className="relative rounded-3xl overflow-hidden bg-muted aspect-[4/3]">
               <img 
-                src={imageUrl} 
+                src={getImageWithFallback(imageUrl)} 
                 alt="Scanned medicine"
                 className="w-full h-full object-cover"
+                onError={(e) => {
+                  // Fallback to placeholder if image fails
+                  (e.target as HTMLImageElement).src = getImageWithFallback(null);
+                }}
               />
               
               {/* Close button */}

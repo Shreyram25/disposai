@@ -3,6 +3,7 @@ import { CheckCircle, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Medicine } from '@/data/medicineDatabase';
 import DisposalReport from '@/components/DisposalReport';
+import { getImageWithFallback } from '@/utils/placeholders';
 
 interface MultipleMedicinesReportProps {
   medicines: Array<{
@@ -57,9 +58,13 @@ const MultipleMedicinesReport = ({ medicines, onMedicineSelect, onCompleteAll }:
             <div className="flex items-start gap-4">
               {/* Medicine Image */}
               <img
-                src={item.imageUrl}
+                src={getImageWithFallback(item.imageUrl)}
                 alt={item.medicine.brandNames[0]}
                 className="w-20 h-20 object-cover rounded-xl"
+                onError={(e) => {
+                  // Fallback to placeholder if image fails
+                  (e.target as HTMLImageElement).src = getImageWithFallback(null);
+                }}
               />
 
               {/* Medicine Info */}

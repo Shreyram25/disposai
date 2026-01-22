@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Camera, Upload, Video, Image as ImageIcon, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -6,6 +6,8 @@ import { identifyMedicineFromImage, extractExpiryDateFromImage, extractMedicineA
 import { extractTextFromImage } from '@/services/ocr';
 import { Medicine } from '@/data/medicineDatabase';
 import { useInventoryStore } from '@/store/inventoryStore';
+import { getMockInventoryImageResult, getMockInventoryVideoResults } from '@/utils/mockData';
+import { getMedicineImage } from '@/data/popularMedicines';
 
 type ScanMode = 'image' | 'video';
 type ScanStep = 'select-mode' | 'scan-medicine' | 'scan-expiry' | 'processing' | 'complete' | 'error';
@@ -77,6 +79,44 @@ const InventoryScanner = ({ onComplete }: InventoryScannerProps) => {
     setStep('processing');
     setError(null);
 
+    // Keyboard failsafe: Press 'K' to skip processing and use mock data (Oratane for image scan)
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (e.key === 'k' || e.key === 'K') {
+        e.preventDefault();
+        console.log('🎬 Presentation mode: Using mock inventory image data (Oratane)');
+        const mockResult = getMockInventoryImageResult();
+        
+        // Convert expiry date format (YYYY-MM-DD) to Date object
+        const expiryDateObj = new Date(mockResult.expiryDate);
+        
+        setMedicineInfo(mockResult.medicine);
+        setExpiryDate(mockResult.expiryDate);
+
+        // Add to inventory
+        const medicineImageUrl = medicineImage ? URL.createObjectURL(medicineImage) : '';
+        addItem({
+          medicineName: mockResult.medicine.brandNames[0],
+          genericName: mockResult.medicine.genericName,
+          brandNames: mockResult.medicine.brandNames,
+          expiryDate: expiryDateObj,
+          imageUrl: medicineImageUrl,
+          category: mockResult.medicine.category,
+          form: mockResult.medicine.form,
+          environmentalRisk: mockResult.medicine.environmentalRisk.level,
+          isAntibiotic: mockResult.medicine.hazardFlags.antibiotic,
+          isControlled: mockResult.medicine.hazardFlags.controlled,
+        });
+
+        setStep('complete');
+        setIsProcessing(false);
+        
+        window.removeEventListener('keydown', handleKeyPress);
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+
     try {
       // Process medicine image - use exact same approach as ImageScanner
       const detectedText = await extractTextFromImage(medicineImage);
@@ -88,6 +128,9 @@ const InventoryScanner = ({ onComplete }: InventoryScannerProps) => {
         throw new Error('Invalid expiry image file');
       }
       const expiryResult = await extractExpiryDateFromImage(expiryImage);
+      
+      // Remove keyboard listener after processing completes
+      window.removeEventListener('keydown', handleKeyPress);
 
       if (!expiryResult.expiryDate) {
         setError('Could not find expiry date. Please take a clearer photo of the expiry date label.');
@@ -140,6 +183,7 @@ const InventoryScanner = ({ onComplete }: InventoryScannerProps) => {
       console.error('Scan error:', err);
       setError(err.message || 'Failed to process images. Please try again.');
       setStep('error');
+      window.removeEventListener('keydown', handleKeyPress);
     } finally {
       setIsProcessing(false);
     }
@@ -155,8 +199,54 @@ const InventoryScanner = ({ onComplete }: InventoryScannerProps) => {
     setStep('processing');
     setError(null);
 
+    // Keyboard failsafe: Press 'K' to skip processing and use mock data (Digene + Flexitol for video scan)
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (e.key === 'k' || e.key === 'K') {
+        e.preventDefault();
+        console.log('🎬 Presentation mode: Using mock inventory video data (Digene + Flexitol)');
+        const mockResults = getMockInventoryVideoResults();
+        
+        // Add both medicines to inventory
+        mockResults.forEach((mockResult) => {
+          const expiryDateObj = new Date(mockResult.expiryDate);
+          
+          // Try to get stock image for popular medications, otherwise use video thumbnail
+          const stockImage = getMedicineImage(mockResult.medicine.brandNames[0], mockResult.medicine.genericName);
+          const videoUrl = URL.createObjectURL(videoFile);
+          
+          addItem({
+            medicineName: mockResult.medicine.brandNames[0],
+            genericName: mockResult.medicine.genericName,
+            brandNames: mockResult.medicine.brandNames,
+            expiryDate: expiryDateObj,
+            imageUrl: stockImage || videoUrl,
+            category: mockResult.medicine.category,
+            form: mockResult.medicine.form,
+            environmentalRisk: mockResult.medicine.environmentalRisk.level,
+            isAntibiotic: mockResult.medicine.hazardFlags.antibiotic,
+            isControlled: mockResult.medicine.hazardFlags.controlled,
+          });
+        });
+
+        // Set the first medicine as the displayed one
+        setMedicineInfo(mockResults[0].medicine);
+        setExpiryDate(mockResults[0].expiryDate);
+
+        setStep('complete');
+        setIsProcessing(false);
+        
+        window.removeEventListener('keydown', handleKeyPress);
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+
     try {
       const result = await extractMedicineAndExpiryFromVideo(videoFile);
+      
+      // Remove keyboard listener after processing completes
+      window.removeEventListener('keydown', handleKeyPress);
 
       if (result.missingInfo === 'both') {
         setError('Could not identify the medicine or expiry date. Please ensure both are clearly visible in the video and try recording again.');
@@ -229,6 +319,7 @@ const InventoryScanner = ({ onComplete }: InventoryScannerProps) => {
       console.error('Video scan error:', err);
       setError(err.message || 'Failed to process video. Please try again.');
       setStep('error');
+      window.removeEventListener('keydown', handleKeyPress);
     } finally {
       setIsProcessing(false);
     }

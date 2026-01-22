@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { useGameStore, ScanRecord } from '@/store/gameStore';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
+import { getImageWithFallback } from '@/utils/placeholders';
 
 const getQualityColor = (quality?: string) => {
   switch (quality) {
@@ -130,15 +131,15 @@ const History = () => {
                 <div className="flex items-start gap-4">
                   {/* Image or Icon */}
                   <div className="w-14 h-14 rounded-xl bg-muted flex items-center justify-center overflow-hidden shrink-0">
-                    {scan.imageUrl ? (
-                      <img 
-                        src={scan.imageUrl} 
-                        alt={scan.medicineName}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <Leaf className="h-6 w-6 text-primary" />
-                    )}
+                    <img 
+                      src={getImageWithFallback(scan.imageUrl)} 
+                      alt={scan.medicineName}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        // Fallback to placeholder if image fails
+                        (e.target as HTMLImageElement).src = getImageWithFallback(null);
+                      }}
+                    />
                   </div>
 
                   {/* Content */}

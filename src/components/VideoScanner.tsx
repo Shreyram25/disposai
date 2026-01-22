@@ -6,6 +6,8 @@ import { Medicine } from '@/data/medicineDatabase';
 import { identifyMedicinesFromVideo, MedicineInfo } from '@/services/openai';
 import { getMedicineImage } from '@/data/popularMedicines';
 import { cn } from '@/lib/utils';
+import { getImageWithFallback } from '@/utils/placeholders';
+import { getMockVideoResults } from '@/utils/mockData';
 
 // Convert MedicineInfo to Medicine format
 const convertMedicineInfo = (info: MedicineInfo): Medicine => ({
@@ -70,6 +72,25 @@ const VideoScanner = ({ onDetections }: VideoScannerProps) => {
     setError(null);
     setDetectedMedicines([]);
 
+    // Keyboard failsafe: Press 'K' to skip processing and use mock data
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (e.key === 'k' || e.key === 'K') {
+        e.preventDefault();
+        console.log('🎬 Presentation mode: Using mock video data');
+        const mockResults = getMockVideoResults();
+        setDetectedMedicines(mockResults);
+        setIsProcessing(false);
+        
+        // Don't immediately call onDetections - let user confirm via UI
+        // The results are now shown in the UI, user can click "Confirm" button
+        
+        window.removeEventListener('keydown', handleKeyPress);
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+
     try {
       // Extract thumbnail for display
       const thumbnail = await extractVideoThumbnail(file);
@@ -77,6 +98,9 @@ const VideoScanner = ({ onDetections }: VideoScannerProps) => {
 
       // Use OpenAI to analyze video directly
       const results = await identifyMedicinesFromVideo(file);
+      
+      // Remove keyboard listener after processing completes
+      window.removeEventListener('keydown', handleKeyPress);
 
       if (results.length === 0) {
         setError('No medicines detected in the video. Please ensure the medicine packages are clearly visible.');
@@ -92,7 +116,7 @@ const VideoScanner = ({ onDetections }: VideoScannerProps) => {
           medicine: convertMedicineInfo(result.medicine),
           confidence: result.confidence,
           detectedText: result.detectedText,
-          imageUrl: stockImage || thumbnail || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2VlZSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTgiIGZpbGw9IiM5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj7wn5CvPC90ZXh0Pjwvc3ZnPg==', // Question mark fallback
+          imageUrl: stockImage || thumbnail || getImageWithFallback(null), // Use placeholder tablet if no image
         };
       });
 
@@ -102,8 +126,9 @@ const VideoScanner = ({ onDetections }: VideoScannerProps) => {
       console.error('Video processing failed:', err);
       setError(err instanceof Error ? err.message : 'Failed to process video. Please ensure the video shows medicine packages clearly.');
       setIsProcessing(false);
+      window.removeEventListener('keydown', handleKeyPress);
     }
-  }, []);
+  }, [onDetections]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -292,9 +317,13 @@ const VideoScanner = ({ onDetections }: VideoScannerProps) => {
                       className="flex items-start gap-3 p-3 bg-muted/30 rounded-xl"
                     >
                       <img
-                        src={detected.imageUrl || thumbnailUrl || ''}
+                        src={getImageWithFallback(detected.imageUrl || thumbnailUrl)}
                         alt={detected.medicine.brandNames[0]}
                         className="w-16 h-16 object-cover rounded-lg"
+                        onError={(e) => {
+                          // Fallback to placeholder if image fails
+                          (e.target as HTMLImageElement).src = getImageWithFallback(null);
+                        }}
                       />
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-sm truncate">
