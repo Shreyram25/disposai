@@ -1,3 +1,5 @@
+import ApiKeyService from './apiKeys';
+
 /**
  * OpenAI API Service
  * Handles all GPT-powered functionality for medicine identification and disposal guidance
@@ -35,12 +37,10 @@ export interface DisposalMethod {
   safetyRating: 'A' | 'B' | 'C' | 'D' | 'E';
 }
 
-const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
 
-if (!OPENAI_API_KEY) {
-  console.warn('⚠️ VITE_OPENAI_API_KEY not found in environment variables. AI features will not work.');
-}
+// Initialize API key service
+const apiKeyService = ApiKeyService.getInstance();
 
 /**
  * Convert image file/URL to base64 data URL
@@ -167,8 +167,12 @@ async function callGPT(
   model: string = 'gpt-4o-mini',
   temperature: number = 0.3
 ): Promise<string> {
+  // Ensure API keys are loaded
+  await apiKeyService.initialize();
+  const OPENAI_API_KEY = apiKeyService.getOpenAIKey();
+
   if (!OPENAI_API_KEY) {
-    throw new Error('OpenAI API key not configured. Please set VITE_OPENAI_API_KEY in your .env file.');
+    throw new Error('OpenAI API key not configured. Please set up Firebase Remote Config or local environment variables.');
   }
 
   try {

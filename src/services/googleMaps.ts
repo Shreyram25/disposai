@@ -1,14 +1,14 @@
+import ApiKeyService from './apiKeys';
+
 /**
  * Google Maps API Service
  * Handles location-based pharmacy searches using Google Maps Places API
  */
 
-const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 const GOOGLE_PLACES_API_URL = 'https://maps.googleapis.com/maps/api/place';
 
-if (!GOOGLE_MAPS_API_KEY) {
-  console.warn('⚠️ VITE_GOOGLE_MAPS_API_KEY not found in environment variables. Google Maps features will not work.');
-}
+// Initialize API key service
+const apiKeyService = ApiKeyService.getInstance();
 
 export interface PharmacyLocation {
   id: number;
@@ -52,8 +52,12 @@ export async function findNearbyPharmaciesWithGoogleMaps(
   longitude: number,
   radius: number = 5000 // 5km default radius
 ): Promise<PharmacyLocation[]> {
+  // Ensure API keys are loaded
+  await apiKeyService.initialize();
+  const GOOGLE_MAPS_API_KEY = apiKeyService.getGoogleMapsKey();
+
   if (!GOOGLE_MAPS_API_KEY) {
-    throw new Error('Google Maps API key not configured');
+    throw new Error('Google Maps API key not configured. Please set up Firebase Remote Config or local environment variables.');
   }
 
   try {
@@ -153,8 +157,12 @@ export async function searchPharmaciesByText(
   query: string,
   city: string = 'Dubai'
 ): Promise<PharmacyLocation[]> {
+  // Ensure API keys are loaded
+  await apiKeyService.initialize();
+  const GOOGLE_MAPS_API_KEY = apiKeyService.getGoogleMapsKey();
+
   if (!GOOGLE_MAPS_API_KEY) {
-    throw new Error('Google Maps API key not configured');
+    throw new Error('Google Maps API key not configured. Please set up Firebase Remote Config or local environment variables.');
   }
 
   try {
