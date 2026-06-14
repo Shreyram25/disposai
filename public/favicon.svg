@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Shield background with gradient -->
+  <defs>
+    <linearGradient id="shieldGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e3a8a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Shield shape -->
+  <path d="M20 10 L50 5 L80 10 L80 70 Q80 85 50 95 Q20 85 20 70 Z" fill="url(#shieldGradient)"/>
+  
+  <!-- Wave element -->
+  <path d="M15 20 Q30 30 50 25 Q70 20 85 30" stroke="#60a5fa" stroke-width="2" fill="none" opacity="0.6"/>
+  
+  <!-- Robot head (simplified) -->
+  <rect x="40" y="25" width="20" height="18" rx="3" fill="white"/>
+  <circle cx="46" cy="32" r="2" fill="#10b981"/>
+  <circle cx="54" cy="32" r="2" fill="#3b82f6"/>
+  <rect x="38" y="30" width="4" height="6" rx="1" fill="white"/>
+  <circle cx="40" cy="33" r="1.5" fill="#10b981"/>
+  
+  <!-- Pills/Capsules -->
+  <ellipse cx="65" cy="30" rx="4" ry="2" fill="#86efac" transform="rotate(45 65 30)"/>
+  <circle cx="68" cy="35" r="2" fill="white"/>
+  <circle cx="72" cy="38" r="1.5" fill="white"/>
+  
+  <!-- Green bin/container -->
+  <path d="M35 50 L45 48 L50 48 L60 50 L58 65 L42 65 Z" fill="#10b981"/>
+  <path d="M40 52 L50 50 L55 50 L53 63 L47 63 Z" fill="#34d399"/>
+  <!-- Leaves icon on bin -->
+  <path d="M46 56 Q48 54 50 56 Q52 54 54 56 Q52 58 50 60 Q48 58 46 56" fill="white" opacity="0.8"/>
+</svg>
+
